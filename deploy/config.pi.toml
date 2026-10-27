@@ -1,0 +1,28 @@
+# Configuration of the Orchestrator on the Pi. Installed as /etc/orchestrator/config.toml the first
+# time only; an update never overwrites it. Every key and its default is described in
+# config.example.toml (next to the code in /opt/orchestrator/current/).
+
+[general]
+timezone = "Asia/Jerusalem"
+data_dir = "/var/lib/orchestrator"
+log_dir = "/var/log/orchestrator"
+
+[boiler]
+base_url = "http://MARELLYPI3:8000/"
+
+[web]
+host = "0.0.0.0"
+port = 8080
+login_required = false
+
+[mail]
+user_email_list = []
+admin_email = ""
+security_alert_email = ""
+
+[calendar]
+calendar_id = "primary"
+write_back = false
+
+[mqtt]
+enabled = false

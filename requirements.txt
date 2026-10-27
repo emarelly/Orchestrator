@@ -1,0 +1,32 @@
+# Runtime dependencies of the Orchestrator (Raspberry Pi OS Trixie, Python 3.13.5, 32-bit armv7l).
+#
+# Versions are deliberately NOT pinned here. tools/check_pi_install.sh installs this file on the Pi in a
+# throw-away virtual environment and writes the exact working versions to requirements.lock;
+# the lock file is what gets deployed (CS-17).
+
+# web service
+flask
+waitress
+
+# HTTP client (boiler Pi REST API)
+requests
+
+# Home Assistant
+paho-mqtt<2          # 2.x changed the callback API; the code is written for 1.6.x
+
+# Google Calendar + Gmail (OAuth 2.0)
+google-auth
+google-auth-oauthlib
+google-api-python-client
+
+# sunrise / sunset / moon times
+astral
+
+# time zone database (zoneinfo itself is in the standard library)
+tzdata
+
+# SSH reboot of the boiler Pi
+paramiko
+
+# systemd notify / watchdog (pure Python)
+sdnotify

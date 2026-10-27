@@ -1,0 +1,29 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "Home control orchestrator: boiler and timer schedules, manual control, status UI, MQTT and e-mail commands"
+requires-python = ">=3.11"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["ref files", "ui-mock"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["orchestrator", "tools", "tests"]
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers --strict-config -ra"
+filterwarnings = ["error"]

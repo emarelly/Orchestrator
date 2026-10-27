@@ -1,0 +1,101 @@
+# Example configuration (copy to config.toml). Every key shown has its default value.
+# Secrets are NOT stored here: they come from environment variables (see README / NFR-8):
+#   BOILER_SSH_USER, BOILER_SSH_PASSWORD, BOILER_SSH_KEY_FILE, MQTT_PASSWORD, UI_PASSWORD,
+#   GOOGLE_CLIENT_SECRET_FILE, GOOGLE_TOKEN_FILE, GOOGLE_CALENDAR_TOKEN_FILE
+# DRY_RUN=1 in the environment overrides [general] dry_run (builds and logs files, sends nothing).
+
+[general]
+dry_run = false
+timezone = ""      # IANA name such as "Asia/Jerusalem"; empty = use the operating system's zone
+data_dir = "data"
+log_dir = "logs"
+
+[boiler]
+base_url = "http://MARELLYPI3:8000/"
+request_timeout_s = 5
+poll_interval_s = 10
+down_after_failures = 3         # failed polls in a row before the boiler Pi counts as down
+stale_after_s = 300             # a status reading older than this is shown as stale
+status_path = "status/"
+history_path = "history/"
+log_path = "log/"
+relay_status_path = "relay/?relay="
+update_schedule_path = "updatecalander/"
+update_timer_path = "updaterelaycalander/"
+relay_on_path = "relayon/"
+relay_off_path = "relayoff/"
+# Reboot of the boiler Pi over SSH (the e-mail command "reset"). The user and the key file or
+# password come from BOILER_SSH_USER and BOILER_SSH_KEY_FILE / BOILER_SSH_PASSWORD.
+# The reboot is refused until the Pi's host key fingerprint is set here; get it with
+#   python -m orchestrator.ssh_reboot --show-host-key
+# and compare it with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the boiler Pi.
+ssh_port = 22
+ssh_host_key = ""               # for example "SHA256:..." (43 characters after the colon)
+ssh_timeout_s = 10
+reboot_grace_s = 300            # down / up alerts are held back this long after a reboot
+# Not decided yet (OQ-16): the upload endpoints for the manual files. Leave unset until they exist.
+# manual_upload_path = "..."
+# relay_manual_upload_path = "..."
+
+[limits]
+max_showers = 5      # hard limit of the heater; values above 5 are rejected
+manual_margin = 1.0
+manual_duration_hours = 3
+
+[web]
+host = "0.0.0.0"
+port = 8080
+login_required = false
+
+[mqtt]
+enabled = false
+host = ""
+port = 1883
+username = ""                   # the password comes from MQTT_PASSWORD
+base_topic = "orchestrator"
+tls = false
+client_id = "orchestrator"
+discovery_prefix = "homeassistant"
+keepalive_s = 60                # Home Assistant shows "offline" about 1.5 x this after a crash
+state_interval_s = 60           # the state is also republished this often
+relay_on_seconds = 600          # a relay switched ON in Home Assistant runs this long
+
+[mail]
+user_email_list = []          # senders allowed to send commands
+admin_email = ""
+security_alert_email = ""
+alert_daily_max = 20           # at most this many security alert e-mails per day
+check_interval_s = 30          # how often the inbox is read for commands
+
+[calendar]
+calendar_id = "primary"
+poll_interval_s = 300
+write_back = false              # true: schedule edits in the UI create / change / delete events
+                                # in the real Google Calendar (needs the read-write permission)
+
+[location]
+# Needed for sunrise / sunset / dawn / dusk / noon / midnight / moon times in timer events.
+# Without it those events are skipped and reported. Both values together, in degrees.
+# Example (approximately Ramat Gan - replace with your own place):
+# latitude = 32.07
+# longitude = 34.82
+
+[relays]
+# Names usable in calendar titles (Timer: relaynum GardenLights ...). One word each (letters, digits,
+# underscore), matched in any case. The same name for two relays is ambiguous: the first one wins and
+# a warning is logged at start-up (the legacy list has spareGround2 twice, for relays 6 and 7).
+names = [
+  ["BoilerHeat", 0], ["BolerLight", 1], ["GardenRoof", 2], ["SpareRoof", 3],
+  ["GardenLights", 4], ["intercom", 5], ["spareGround2", 6], ["spareGround2", 7],
+]
+
+[logging]
+level = "INFO"                  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+json_format = false             # true: one JSON object per line
+console = true                  # also write to the console (systemd journal)
+file_max_bytes = 2097152        # main log: 2 MB x (3 + 1) files
+file_backup_count = 3
+audit_max_bytes = 1048576       # audit log: 1 MB x (5 + 1) files
+audit_backup_count = 5
+ring_size = 200                 # events kept in memory for the System tab
+collapse_window_s = 600         # identical warnings inside this window are collapsed

@@ -1,0 +1,7 @@
+# Development / check tools. Install on the development machine, not on the Pi.
+# Not pinned: pip picks the newest release that supports the Python version it runs on.
+-r requirements.txt
+pytest
+black
+ruff
+mypy

@@ -1,0 +1,5 @@
+# Files that run on Linux must keep Unix line endings, whatever the editor on Windows does.
+*.sh text eol=lf
+deploy/*.service text eol=lf
+deploy/*.example text eol=lf
+deploy/*.toml text eol=lf

@@ -1,0 +1,31 @@
+# Python / tooling caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and runtime data - never committed (NFR-8, FR-GOOG-4a)
+.credentials/
+client_secret*.json
+token*.json
+*.env
+.env
+
+# The deploy archive holds copies of the secrets above (docs/INSTALL.md step 1)
+*.tgz
+*.tar.gz
+
+# Logs and local runtime state
+logs/
+data/
+*.log
+
+# Pi install check report (the generated requirements.lock IS committed)
+pi_install_report.txt
+
+# Legacy script settings hold the boiler Pi SSH password and a home address
+ref files/Config.py

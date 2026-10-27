@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home Control</title>
+<style>
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --surface2: #eef1f4; --text: #1b2733; --muted: #66758a;
+  --border: #d9dfe6; --accent: #1f6feb; --accent-text: #ffffff;
+  --ok: #1a8f4c; --warn: #b7791f; --bad: #c62828; --hot: #e5484d; --warm: #f2994a; --cool: #4aa3df;
+  --on: #1a8f4c; --manual: #7c3aed; --off: #66758a;
+  --shadow: 0 1px 2px rgba(20,30,50,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151c; --surface: #18212b; --surface2: #202b37; --text: #e7edf3; --muted: #93a3b5;
+    --border: #2c3947; --accent: #4c8dff; --accent-text: #08111c;
+    --ok: #3ccf7a; --warn: #e3a64a; --bad: #ff6b6b; --hot: #ff6b6f; --warm: #f5a561; --cool: #5db4ea;
+    --on: #3ccf7a; --manual: #a98bff; --off: #93a3b5; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151c; --surface: #18212b; --surface2: #202b37; --text: #e7edf3; --muted: #93a3b5;
+  --border: #2c3947; --accent: #4c8dff; --accent-text: #08111c;
+  --ok: #3ccf7a; --warn: #e3a64a; --bad: #ff6b6b; --hot: #ff6b6f; --warm: #f5a561; --cool: #5db4ea;
+  --on: #3ccf7a; --manual: #a98bff; --off: #93a3b5; --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px 48px; }
+
+/* header */
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--border); }
+.hbar { display: flex; align-items: center; gap: 12px; padding: 12px 0 8px; flex-wrap: wrap; }
+.hbar h1 { font-size: 18px; margin: 0; flex: 1 1 auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 13px; background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+nav { display: flex; gap: 4px; overflow-x: auto; }
+nav button { background: none; border: none; border-bottom: 3px solid transparent; padding: 8px 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+
+/* layout */
+main { padding-top: 16px; }
+.panel { display: none; } .panel.active { display: block; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 700; }
+.c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+@media (max-width: 800px) { .c4, .c5, .c6, .c7, .c8 { grid-column: span 12; } }
+
+/* banner */
+.banner { display: none; margin: 12px 0 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-weight: 600; }
+.banner.show { display: block; }
+
+/* mode + controls */
+.mode { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.mode .label { font-size: 28px; font-weight: 800; line-height: 1; }
+.mode[data-mode="Auto"] .label { color: var(--on); }
+.mode[data-mode="Manual"] .label { color: var(--manual); }
+.mode[data-mode="Off"] .label { color: var(--off); }
+.sub { color: var(--muted); font-size: 13px; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.seg button { padding: 12px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); font-weight: 700; }
+.seg button.active { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.seg button:disabled { opacity: .55; cursor: wait; }
+.btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); font-weight: 600; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.btn.danger { color: var(--bad); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+
+/* heater */
+.heater { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; font-weight: 700; }
+.heater .badge { padding: 2px 10px; border-radius: 6px; font-size: 13px; background: var(--surface2); border: 1px solid var(--border); }
+.heater .badge.on { background: color-mix(in srgb, var(--hot) 18%, var(--surface)); color: var(--hot); border-color: var(--hot); }
+
+/* meters */
+.meter { margin: 0 0 18px; }
+.meter .row { display: flex; justify-content: space-between; align-items: baseline; }
+.meter .val { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.bar { position: relative; height: 14px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; }
+.bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 8px; background: var(--accent); }
+.bar .tick { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--text); }
+.bar .tick.min { background: var(--warn); }
+.bar .limit { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(45deg, transparent 0 4px, color-mix(in srgb, var(--bad) 35%, transparent) 4px 6px); border-radius: 0 8px 8px 0; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.kv div { background: var(--surface2); border-radius: 8px; padding: 8px 10px; }
+.kv b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.kv span { font-size: 12px; color: var(--muted); }
+
+/* tank */
+.tankwrap { display: flex; gap: 16px; align-items: center; justify-content: center; }
+.tank { width: 120px; height: 230px; border: 3px solid var(--border); border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; background: var(--surface2); }
+.tank div + div { border-top: 3px solid var(--border); }
+.tank div { flex: 1; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.35); font-variant-numeric: tabular-nums; }
+.tanklabels { display: flex; flex-direction: column; justify-content: space-around; height: 230px; font-size: 13px; color: var(--muted); }
+
+/* chart */
+svg text { fill: var(--muted); font-size: 11px; }
+.chart { width: 100%; height: auto; }
+
+/* schedule */
+.days { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.days button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface2); font-weight: 600; }
+.days button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+td.actions { text-align: right; white-space: nowrap; }
+.timeline { position: relative; height: 34px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); margin: 4px 0 16px; overflow: hidden; }
+.timeline .seg1 { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 35%, transparent); border-right: 2px solid var(--accent); font-size: 11px; padding: 2px 4px; overflow: hidden; white-space: nowrap; }
+.sync { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.empty { color: var(--muted); padding: 12px 0; }
+
+/* relays */
+.relays { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.relay { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface2); }
+.relay h3 { margin: 0 0 2px; font-size: 15px; }
+.relay .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.relay input { width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.relay.locked { opacity: .65; }
+
+/* dialog + form */
+dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); padding: 20px; max-width: 420px; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog h3 { margin: 0 0 12px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input[type=text], input[type=number], input[type=time], select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); }
+.err { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 8px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dlgactions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* system */
+.log { background: var(--surface2); border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, Consolas, monospace; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.list li:last-child { border-bottom: none; }
+
+/* toast + dev */
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(80px); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; transition: transform .25s; z-index: 20; max-width: calc(100% - 32px); }
+#toast.show { transform: translateX(-50%) translateY(0); }
+/* ---------- responsive / mobile ---------- */
+.card { min-width: 0; }
+input, select { font-size: 16px; }                       /* stops iOS zoom-on-focus */
+.relays { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+header, main { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+#toast { bottom: calc(20px + env(safe-area-inset-bottom)); }
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  .wrap { padding-left: 12px; padding-right: 12px; }
+  .hbar { gap: 6px; padding-top: 8px; }
+  .hbar h1 { font-size: 16px; flex-basis: 100%; }
+  .chip { font-size: 12px; padding: 2px 8px; }
+  nav button { padding: 10px 12px; }
+  .card { padding: 14px; border-radius: 10px; }
+  .grid { gap: 12px; }
+  .mode .label { font-size: 26px; }
+  .seg button { padding: 14px 8px; font-size: 16px; }         /* >= 44 px touch target */
+  .btn, .btn.small { min-height: 40px; padding: 8px 14px; }
+  .days button { min-height: 40px; padding: 8px 14px; }
+  .tank { width: 100px; height: 190px; } .tanklabels { height: 190px; }
+  .legend { gap: 8px 12px; }
+  /* tables become stacked cards */
+  table, tbody { display: block; }
+  thead { display: none; }
+  tr { display: block; border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; margin-bottom: 8px; background: var(--surface2); }
+  td { display: flex; justify-content: space-between; gap: 12px; border: none; padding: 4px 0; text-align: right; }
+  td::before { content: attr(data-label); color: var(--muted); text-align: left; }
+  td.actions { justify-content: flex-end; gap: 8px; padding-top: 8px; }
+  td.actions::before, td[colspan]::before { content: none; }
+  td[colspan] { display: block; text-align: left; }
+  /* dialogs become bottom sheets */
+  dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); max-height: 92vh; overflow: auto; }
+  .row2 { grid-template-columns: 1fr; gap: 0; }
+  .dev { font-size: 12px; }
+}
+@media (max-width: 380px) {
+  .kv { grid-template-columns: 1fr; }
+  .meter .val { font-size: 22px; }
+}
+@media (hover: none) { .btn:hover, .seg button:hover { filter: none; } }
+.hbar .push { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.mode .sub { margin-top: 4px; }
+.warnline { color: var(--warn); font-size: 13px; min-height: 18px; margin-top: 8px; }
+.note { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--surface2); border: 1px solid var(--border); font-size: 13px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="hbar">
+      <h1>Home Control</h1>
+      <span class="chip" id="chipDry" hidden title="Nothing is sent to the boiler Pi"><span class="dot warn"></span>DRY RUN</span>
+      <span class="chip" title="Boiler Pi /status"><span class="dot" id="dotBoiler"></span><span id="txtBoiler">Boiler</span></span>
+      <span class="chip" title="Google Calendar sync"><span class="dot" id="dotCal"></span><span id="txtCal">Calendar</span></span>
+      <span class="chip" title="Schedule files pushed to the boiler Pi"><span class="dot" id="dotPush"></span><span id="txtPush">files</span></span>
+      <span class="push"><button class="btn small" id="loginBtn" hidden>Log in</button><button class="btn small" id="logoutBtn" hidden>Log out</button></span>
+    </div>
+    <nav role="tablist">
+      <button role="tab" aria-selected="true" data-tab="status">Status</button>
+      <button role="tab" aria-selected="false" data-tab="boiler">Boiler schedule</button>
+      <button role="tab" aria-selected="false" data-tab="timer">Timer schedule</button>
+      <button role="tab" aria-selected="false" data-tab="relays">Relays</button>
+      <button role="tab" aria-selected="false" data-tab="system">System</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="banner" id="banner"></div>
+
+  <section class="panel active" id="tab-status">
+    <div class="grid" style="margin-top:16px">
+      <div class="card c4">
+        <h2>Mode</h2>
+        <div class="mode" id="modeBox" data-mode="">
+          <div class="label" id="modeLabel">–</div>
+        </div>
+        <div class="sub" id="modeSub"></div>
+        <div class="heater">Heater <span class="badge" id="heaterBadge">–</span></div>
+        <div class="sub" id="nextStart" style="margin-top:6px"></div>
+        <div class="seg" role="group" aria-label="Manual control">
+          <button data-act="on">On</button>
+          <button data-act="off">Off</button>
+          <button data-act="auto">Auto</button>
+        </div>
+        <div class="sub" style="margin-top:10px">On sets Target and Min above the current showers (max 5). Off sets both to 0. Auto removes the override.</div>
+      </div>
+
+      <div class="card c4">
+        <h2>Showers available</h2>
+        <div class="meter">
+          <div class="row"><span>Thermodynamic (new)</span><span class="val" id="valNew">–</span></div>
+          <div class="bar" id="barNew"></div>
+        </div>
+        <div class="meter">
+          <div class="row"><span>Linear (old)</span><span class="val" id="valOld">–</span></div>
+          <div class="bar" id="barOld"></div>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--text)"></i>Target</span>
+          <span><i style="background:var(--warn)"></i>Min kept at all times</span>
+          <span><i style="background:var(--bad);opacity:.5"></i>Above 5 not allowed</span>
+        </div>
+        <div class="kv" style="margin-top:14px">
+          <div><b id="kvTarget">–</b><span>Target now</span></div>
+          <div><b id="kvMin">–</b><span>Min now</span></div>
+        </div>
+      </div>
+
+      <div class="card c4">
+        <h2>Boiler temperature</h2>
+        <div class="tankwrap">
+          <div class="tank" id="tank"></div>
+          <div class="tanklabels"><span>Upper</span><span>Mid</span><span>Lower</span></div>
+        </div>
+        <div class="sub" style="margin-top:10px;text-align:center">Each level is its own sensor, in a fixed position.</div>
+      </div>
+
+      <div class="card c12">
+        <h2>Last 24 hours</h2>
+        <svg class="chart" id="chart" viewBox="0 0 900 280" role="img" aria-label="Showers in the last 24 hours"></svg>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>Showers (new)</span>
+          <span><i style="background:var(--cool)"></i>Showers (old)</span>
+          <span><i style="background:var(--text)"></i>Target</span>
+          <span><i style="background:var(--warn)"></i>Min</span>
+          <span><i style="background:var(--hot);opacity:.35"></i>Heater on</span>
+        </div>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:12px">Data from the boiler Pi every 10 s. Reading is <span id="age">–</span> old.</p>
+  </section>
+
+  <section class="panel" id="tab-boiler">
+    <div class="card" style="margin-top:16px">
+      <h2>Boiler schedule</h2>
+      <div class="note" id="editNote" hidden>Editing is switched off. The schedule is read from Google Calendar only.</div>
+      <div class="sub" style="margin-bottom:12px">Edits here are written to the calendar as <code>Boiler: target=…; min=…</code> events and read back from it.</div>
+      <div class="days" id="boilerDays"></div>
+      <div class="sub">Each slot is in force from its start until the next slot starts. Min is kept in the boiler at all times in that period.</div>
+      <div class="timeline" id="boilerTimeline" aria-hidden="true"></div>
+      <table>
+        <thead><tr><th>Start</th><th>Target</th><th>Min</th><th></th></tr></thead>
+        <tbody id="boilerRows"></tbody>
+      </table>
+      <div style="margin-top:12px"><button class="btn primary" id="addSlot">Add slot</button></div>
+    </div>
+  </section>
+
+  <section class="panel" id="tab-timer">
+    <div class="card" style="margin-top:16px">
+      <h2>Timer schedule</h2>
+      <div class="note" id="editNote2" hidden>Editing is switched off. The schedule is read from Google Calendar only.</div>
+      <div class="sub" style="margin-bottom:12px">Written to the calendar as <code>Timer: relaynum … start … end …</code> events. Sunrise/sunset times are resolved to clock times for each day.</div>
+      <table>
+        <thead><tr><th>Relay</th><th>Days</th><th>On</th><th>Off</th><th></th></tr></thead>
+        <tbody id="timerRows"></tbody>
+      </table>
+      <div style="margin-top:12px"><button class="btn primary" id="addTimer">Add timer</button></div>
+      <h2 style="margin-top:24px">Resolved times sent to the boiler Pi (TimeCal.json)</h2>
+      <table>
+        <thead><tr><th>Day</th><th>Relay</th><th>Switch</th><th>At</th></tr></thead>
+        <tbody id="resolvedRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="tab-relays">
+    <div class="card" style="margin-top:16px">
+      <h2>Manual relay switching</h2>
+      <p class="sub" style="margin-top:0">Switch a relay on for a number of seconds (more than 10). The Orchestrator builds the manual file and sends it to the boiler Pi.</p>
+      <div class="relays" id="relays"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="tab-system">
+    <div class="grid" style="margin-top:16px">
+      <div class="card c6">
+        <h2>Connections</h2>
+        <ul class="list">
+          <li><span>Boiler Pi</span><span id="sysBoiler">–</span></li>
+          <li><span>Google Calendar</span><span id="sysCal">–</span></li>
+          <li><span>Boiler schedule file</span><span id="sysPushBoiler">–</span></li>
+          <li><span>Timer schedule file</span><span id="sysPushTimer">–</span></li>
+          <li><span>Service</span><span id="sysVer">–</span></li>
+        </ul>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="syncNow">Read calendar now</button>
+          <button class="btn" id="pushNow">Push files now</button>
+        </div>
+      </div>
+      <div class="card c6">
+        <h2>Recent events</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="slotDlg">
+  <form method="dialog" id="slotForm">
+    <h3 id="slotTitle">Add slot</h3>
+    <label for="fDay">Day</label>
+    <select id="fDay"></select>
+    <label for="fTime">Start time</label>
+    <input type="time" id="fTime" step="1" value="06:00:00">
+    <div class="row2">
+      <div><label for="fTarget">Target (showers)</label><input type="number" id="fTarget" step="0.1" min="0" max="5" value="3.0"></div>
+      <div><label for="fMin">Min (showers)</label><input type="number" id="fMin" step="0.1" min="0" max="5" value="2.0"></div>
+    </div>
+    <div class="warnline" id="slotWarn"></div>
+    <div class="err" id="slotErr"></div>
+    <div class="dlgactions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="slotSave" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="timerDlg">
+  <form method="dialog" id="timerForm">
+    <h3>Timer event</h3>
+    <label>Relays</label>
+    <div class="days" id="tRelays" style="margin:0"></div>
+    <label>Days</label>
+    <div class="days" id="tDays" style="margin:0"></div>
+    <div class="row2">
+      <div><label for="tOnType">On at</label><select id="tOnType"></select></div>
+      <div><label for="tOn">Time / offset (min)</label><input type="text" id="tOn" value="17:30:00"></div>
+    </div>
+    <div class="row2">
+      <div><label for="tOffType">Off</label><select id="tOffType"></select></div>
+      <div><label for="tOff">Time / seconds / offset (min)</label><input type="text" id="tOff" value="23:00:00"></div>
+    </div>
+    <div class="err" id="timerErr"></div>
+    <div class="dlgactions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="timerSave" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirmDlg">
+  <form method="dialog">
+    <h3 id="cTitle">Confirm</h3>
+    <p id="cText" class="sub"></p>
+    <div class="dlgactions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="cOk" value="ok">Confirm</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="loginDlg">
+  <form method="dialog" id="loginForm">
+    <h3>Log in</h3>
+    <label for="lPass">Password</label>
+    <input type="password" id="lPass" autocomplete="current-password" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
+    <div class="err" id="loginErr"></div>
+    <div class="dlgactions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="loginOk" value="ok">Log in</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];            // day 1 = Sunday
+const ASTRO = ['sunrise','sunset','dawn','dusk','noon','midnight','moonrise','moonset','twilight'];
+const MAXSH = 5;
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hm = t => String(t).slice(0, 5);
+const num = v => (Math.round(v * 100) / 100).toString();
+let ST = null, SCH = null, HIST = [], RELAYS = [], SYS = null;
+let fetchedAt = 0, loginRequired = false, loggedIn = true, selDay = 1, editItem = null, timerItem = null, loadedAt = null;
+
+let toastTimer;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4200); }
+
+async function api(method, url, body) {
+  const opt = {method, headers: {}};
+  if (method !== 'GET') { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body || {}); }
+  let r;
+  try { r = await fetch(url, opt); } catch (e) { return {ok: false, status: 0, data: {error: 'No answer from the Orchestrator'}}; }
+  let data = {};
+  try { data = await r.json(); } catch (e) { data = {}; }
+  if (r.status === 401 && loginRequired && url !== '/api/login') { loggedIn = false; renderSession(); openLogin(); }
+  return {ok: r.ok, status: r.status, data};
+}
+const why = res => res.data.error || res.data.message || ('Error ' + res.status);
+
+/* ---------- tabs ---------- */
+function showTab(name) {
+  $$('nav button').forEach(x => x.setAttribute('aria-selected', x.dataset.tab === name));
+  $$('.panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'status') drawChart();
+  if (name === 'boiler' || name === 'timer') loadSchedules();
+  if (name === 'system') loadSystem();
+}
+$$('nav button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+const activeTab = () => $('nav button[aria-selected="true"]').dataset.tab;
+
+/* ---------- status ---------- */
+function barHtml(v, tg, mn) {
+  const max = 6, pct = x => Math.min(100, x / max * 100);
+  return `<div class="fill" style="width:${pct(v)}%"></div><div class="limit" style="width:${100 - pct(MAXSH)}%"></div>` +
+         `<div class="tick min" style="left:${pct(mn)}%" title="Min ${mn}"></div><div class="tick" style="left:${pct(tg)}%" title="Target ${tg}"></div>`;
+}
+// Tank temperature bands by what the water means for a shower (white text on every colour).
+const TEMP_BANDS = [
+  [70, '#a3153f', 'extremely hot'], [60, '#d63d44', 'scalding'], [50, '#d9822b', 'very hot'],
+  [40, '#2e9e5b', 'hot, good for a shower'], [30, '#1f9d96', 'lukewarm'], [-Infinity, '#2f86c4', 'cold'],
+];
+function tempBand(t) { return TEMP_BANDS.find(b => t >= b[0]) || TEMP_BANDS[TEMP_BANDS.length - 1]; }
+function tempColor(t) { return tempBand(t)[1]; }
+function ageText(s) { return s < 90 ? s + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : Math.round(s / 3600) + ' h'; }
+function isOffline() { return !ST || !ST.status || ST.connection.state === 'down' || ST.stale; }
+function renderStatus() {
+  const d = ST, s = d && d.status, off = isOffline();
+  $('#modeBox').dataset.mode = s ? s.mode : '';
+  $('#modeLabel').textContent = s ? s.mode : '–';
+  $('#modeSub').textContent = !s ? '' : s.mode === 'Manual' ? 'reverts to Auto about 3 h after the request' : s.mode === 'Auto' ? 'following the boiler schedule' : s.mode === 'Off' ? 'heating is switched off' : '';
+  const heating = !!s && s.heater_on;
+  const hb = $('#heaterBadge'); hb.textContent = s ? (heating ? 'On' : 'Off') : '–'; hb.classList.toggle('on', heating);
+  const m = s ? s.minutes_to_start : 0;
+  $('#nextStart').textContent = !s ? '' : heating ? 'Heating now' : m > 0 ? `Next heating starts in ${Math.floor(m / 60)} h ${m % 60} min` : '';
+  $('#valNew').textContent = s ? s.showers_thermo.toFixed(2) : '–';
+  $('#valOld').textContent = s ? s.showers_linear.toFixed(2) : '–';
+  $('#barNew').innerHTML = s ? barHtml(s.showers_thermo, s.target, s.min) : '';
+  $('#barOld').innerHTML = s ? barHtml(s.showers_linear, s.target, s.min) : '';
+  $('#kvTarget').textContent = s ? s.target.toFixed(1) : '–';
+  $('#kvMin').textContent = s ? s.min.toFixed(1) : '–';
+  const lv = s ? [s.levels.upper, s.levels.mid, s.levels.lower] : [];
+  $('#tank').innerHTML = lv.map(t => `<div style="background:${tempColor(t)}" title="${tempBand(t)[2]}">${t.toFixed(1)}°</div>`).join('');
+  $$('.seg button').forEach(b => {
+    const a = b.dataset.act;
+    const on = !!s && ((a === 'on' && s.mode === 'Manual' && s.target > 0) || (a === 'off' && s.mode === 'Manual' && s.target === 0) || (a === 'auto' && s.mode === 'Auto'));
+    b.classList.toggle('active', on); b.disabled = off || busy;
+  });
+  const state = d ? d.connection.state : 'unknown';
+  $('#dotBoiler').className = 'dot ' + (!d ? '' : state === 'up' && !d.stale ? 'ok' : state === 'down' ? 'bad' : 'warn');
+  $('#txtBoiler').textContent = !d ? 'Boiler' : off ? (state === 'down' ? 'Boiler offline' : 'Boiler: old reading') : 'Boiler ' + (s ? s.mode : '');
+  const banner = $('#banner');
+  banner.textContent = 'Boiler not responding – ' + (s ? 'showing the last good reading from ' + s.date.slice(11, 16) + '.' : 'no reading yet.') + ' Controls are disabled.';
+  banner.classList.toggle('show', off);
+  $('#chipDry').hidden = !(d && d.dry_run);
+  renderAge();
+}
+function renderAge() {
+  const s = ST && ST.status;
+  $('#age').textContent = s ? ageText(Math.max(0, s.age_s + Math.round((Date.now() - fetchedAt) / 1000))) : '–';
+}
+let busy = false;
+async function sendManual(act) {
+  busy = true; renderStatus();
+  const res = await api('POST', '/api/manual', {action: act});
+  busy = false;
+  toast(res.ok ? res.data.message : why(res));
+  await loadStatus();
+}
+$$('.seg button').forEach(b => b.addEventListener('click', () => sendManual(b.dataset.act)));
+
+async function loadStatus() {
+  const res = await api('GET', '/api/status');
+  if (!res.ok) { ST = null; renderStatus(); return; }
+  ST = res.data; fetchedAt = Date.now(); renderStatus(); renderCalendarChip();
+}
+
+/* ---------- 24 h chart ---------- */
+async function loadHistory() {
+  const res = await api('GET', '/api/history');
+  if (res.ok) { HIST = res.data.samples; drawChart(); }
+}
+function drawChart() {
+  const svg = $('#chart'), box = svg.parentElement;
+  const W = Math.max(280, Math.min(900, Math.floor(box.clientWidth - 32))), H = W < 520 ? 240 : 280;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  if (!HIST.length) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No history yet</text>`; return; }
+  const L = 30, R = 8, T = 10, B = 26, pw = W - L - R, ph = H - T - B, maxY = 6, hStep = W < 520 ? 6 : 3;
+  const pts = HIST.map(p => ({t: Date.parse(p.at), n: p.showers_thermo, o: p.showers_linear, tg: p.target, mn: p.min, heat: p.heater > 0}));
+  const end = pts[pts.length - 1].t, start = end - 24 * 3600e3;
+  const x = t => L + (t - start) / (end - start) * pw, y = v => T + ph - Math.min(maxY, Math.max(0, v)) / maxY * ph;
+  let g = '';
+  for (let v = 0; v <= maxY; v++) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let t = Math.ceil(start / 3600e3) * 3600e3; t <= end; t += 3600e3) {
+    const h = new Date(t).getHours();
+    if (h % hStep === 0) g += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle">${String(h).padStart(2, '0')}:00</text>`;
+  }
+  let heat = '', from = null;
+  pts.forEach((p, i) => {
+    if (p.heat && from === null) from = p.t;
+    if ((!p.heat || i === pts.length - 1) && from !== null) { heat += `<rect x="${x(from)}" y="${T}" width="${Math.max(1, x(p.t) - x(from))}" height="${ph}" fill="var(--hot)" opacity=".16"/>`; from = null; }
+  });
+  const path = (key, col, w, dash) => `<path d="${pts.filter(p => p.t >= start).map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p[key]).toFixed(1)).join('')}" fill="none" stroke="${col}" stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
+  svg.innerHTML = g + heat + path('mn', 'var(--warn)', 1.5, '5 4') + path('tg', 'var(--text)', 1.5, '2 3') + path('o', 'var(--cool)', 1.5) + path('n', 'var(--accent)', 2.2);
+}
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawChart, 150); });
+
+/* ---------- schedules ---------- */
+async function loadSchedules() {
+  const res = await api('GET', '/api/schedules');
+  if (!res.ok) return;
+  SCH = res.data; loadedAt = ST ? ST.now : null;
+  renderCalendarChip(); renderSchedule(); renderTimers();
+}
+function renderCalendarChip() {
+  const c = SCH && SCH.calendar, dot = $('#dotCal'), txt = $('#txtCal');
+  if (!c) { dot.className = 'dot'; txt.textContent = 'Calendar: waiting'; }
+  else if (c.auth_lost) { dot.className = 'dot bad'; txt.textContent = 'Google authorization needed'; }
+  else if (!c.ok) { dot.className = 'dot warn'; txt.textContent = 'Calendar offline'; }
+  else {
+    const mins = ST ? Math.max(0, Math.round((Date.parse(ST.now) - Date.parse(c.at)) / 60000)) : 0;
+    dot.className = 'dot ok'; txt.textContent = 'Calendar read ' + (mins < 1 ? 'just now' : mins + ' min ago');
+  }
+  const p = SCH ? SCH.push : [], bad = p.some(x => x.last_error), pend = p.some(x => x.pending);
+  $('#dotPush').className = 'dot ' + (!p.length ? '' : bad ? 'bad' : pend ? 'warn' : 'ok');
+  $('#txtPush').textContent = !p.length ? 'files' : bad ? 'push failing' : pend ? 'pushing…' : 'files in sync';
+  const can = !!SCH && SCH.editing_enabled && loggedIn;
+  $('#addSlot').hidden = $('#addTimer').hidden = !can;
+  $('#editNote').hidden = $('#editNote2').hidden = !SCH || SCH.editing_enabled;
+}
+const items = kind => (SCH ? SCH.items : []).filter(i => i.kind === kind);
+function canEdit() { return !!SCH && SCH.editing_enabled && loggedIn; }
+function renderSchedule() {
+  $('#boilerDays').innerHTML = DAYS.map((n, i) => `<button aria-pressed="${selDay === i + 1}" data-d="${i + 1}">${n}</button>`).join('');
+  $$('#boilerDays button').forEach(b => b.addEventListener('click', () => { selDay = +b.dataset.d; renderSchedule(); }));
+  const rows = items('boiler').filter(i => i.day === selDay).sort((a, b) => a.time.localeCompare(b.time));
+  const acts = r => canEdit() ? `<td class="actions"><button class="btn small" data-edit="${esc(r.id)}">Edit</button> <button class="btn small danger" data-del="${esc(r.id)}">Delete</button></td>` : '<td class="actions"></td>';
+  $('#boilerRows').innerHTML = rows.length ? rows.map(r => `<tr><td data-label="Start">${hm(r.time)}</td><td data-label="Target">${esc(r.target)}</td><td data-label="Min">${esc(r.min)}</td>${acts(r)}</tr>`).join('')
+    : '<tr><td colspan="4" class="empty">No slots for this day – the previous day\'s last slot stays in force.</td></tr>';
+  const mins = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  $('#boilerTimeline').innerHTML = rows.map((r, i) => {
+    const s = mins(r.time) / 1440 * 100, e = (i < rows.length - 1 ? mins(rows[i + 1].time) : 1440) / 1440 * 100;
+    return `<div class="seg1" style="left:${s}%;width:${e - s}%" title="${hm(r.time)} target ${esc(r.target)} min ${esc(r.min)}">${esc(r.target)}/${esc(r.min)}</div>`;
+  }).join('');
+  $$('[data-edit]').forEach(b => b.addEventListener('click', () => openSlot(findItem(b.dataset.edit))));
+  $$('[data-del]').forEach(b => b.addEventListener('click', () => deleteItem(findItem(b.dataset.del), 'slot')));
+}
+const findItem = id => (SCH ? SCH.items : []).find(i => i.id === id) || null;
+function afterEdit(res, what) {
+  toast(res.ok ? what + ' – saved to the calendar, updating the schedule…' : why(res));
+  if (res.ok) { setTimeout(loadSchedules, 1500); setTimeout(loadSchedules, 5000); setTimeout(loadStatus, 6000); }
+  return res.ok;
+}
+function deleteItem(item, word) {
+  if (!item) return;
+  const n = item.series_days.length;
+  confirmDlg('Delete ' + word, 'Delete this event from the calendar and the schedule?' + (n > 1 ? ` It is one event repeated on ${n} days: all of them are deleted.` : ''), async () => {
+    afterEdit(await api('DELETE', '/api/schedules/' + item.kind + '/' + encodeURIComponent(item.id), {edited_at: loadedAt}), 'Deleted');
+  });
+}
+$('#fDay').innerHTML = DAYS.map((n, i) => `<option value="${i + 1}">${n}</option>`).join('');
+function openSlot(item) {
+  editItem = item;
+  $('#slotTitle').textContent = item ? 'Edit slot' : 'Add slot';
+  $('#fDay').value = item ? item.day : selDay; $('#fTime').value = item ? item.time : '12:00:00';
+  $('#fTarget').value = item ? item.target : '3.0'; $('#fMin').value = item ? item.min : '2.0';
+  const shared = !!item && item.series_days.length > 1;
+  $('#fDay').disabled = shared;
+  $('#slotErr').textContent = shared ? `This slot repeats on ${item.series_days.length} days, so its day can only be changed in Google Calendar.` : '';
+  checkSlotWarn();
+  $('#slotDlg').showModal();
+}
+function checkSlotWarn() {
+  const tg = parseFloat($('#fTarget').value), mn = parseFloat($('#fMin').value);
+  $('#slotWarn').textContent = mn > tg ? 'Note: Min is above Target. This is allowed, but check that it is what you want.' : '';
+}
+['#fTarget', '#fMin'].forEach(s => $(s).addEventListener('input', checkSlotWarn));
+$('#addSlot').addEventListener('click', () => openSlot(null));
+$('#slotSave').addEventListener('click', async e => {
+  e.preventDefault();
+  const tg = parseFloat($('#fTarget').value), mn = parseFloat($('#fMin').value), d = +$('#fDay').value;
+  const t = $('#fTime').value.length === 5 ? $('#fTime').value + ':00' : $('#fTime').value;
+  let err = '';
+  if (isNaN(tg) || isNaN(mn)) err = 'Target and Min are required.';
+  else if (tg > MAXSH || mn > MAXSH) err = `Values above ${MAXSH} are not allowed (heater limit).`;
+  else if (tg < 0 || mn < 0) err = 'Values cannot be negative.';
+  else if (!t) err = 'Start time is required.';
+  else if (items('boiler').some(i => (!editItem || i.series !== editItem.series) && i.day === d && i.time === t)) err = 'There is already a slot at that time.';
+  if (err) { $('#slotErr').textContent = err; return; }
+  const body = {target: tg, min: mn, edited_at: loadedAt};
+  let res;
+  if (editItem) {
+    if (t !== editItem.time) body.time = t;
+    if (d !== editItem.day && editItem.series_days.length === 1) body.days = [d];
+    res = await api('PUT', '/api/schedules/boiler/' + encodeURIComponent(editItem.id), body);
+  } else {
+    delete body.edited_at; body.time = t; body.days = [d];
+    res = await api('POST', '/api/schedules/boiler', body);
+  }
+  if (afterEdit(res, editItem ? 'Slot changed' : 'Slot added')) { selDay = d; $('#slotDlg').close(); } else $('#slotErr').textContent = why(res);
+});
+
+/* ---------- timers ---------- */
+const astroText = a => `${a.astro} ${a.offset >= 0 ? '+' : '−'}${Math.abs(a.offset)} min`;
+const onText = i => i.start_astro ? astroText(i.start_astro) : hm(i.time);
+const offText = i => i.end ? hm(i.end) : i.end_astro ? astroText(i.end_astro) : `after ${i.duration_s} s`;
+const relayName = n => { const r = RELAYS.find(x => x.number === n); return n + (r && r.name ? ' · ' + r.name : ''); };
+function timerSeries() {
+  const seen = new Map();
+  items('timer').forEach(i => { if (!seen.has(i.series)) seen.set(i.series, i); });
+  return [...seen.values()];
+}
+function renderTimers() {
+  const acts = i => canEdit() ? `<td class="actions"><button class="btn small" data-tedit="${esc(i.id)}">Edit</button> <button class="btn small danger" data-tdel="${esc(i.id)}">Delete</button></td>` : '<td class="actions"></td>';
+  $('#timerRows').innerHTML = timerSeries().map(i => `<tr><td data-label="Relay">${esc(i.relays.map(relayName).join(', '))}</td><td data-label="Days">${i.series_days.length === 7 ? 'Every day' : i.series_days.map(d => DAYS[d - 1]).join(' ')}</td><td data-label="On">${esc(onText(i))}</td><td data-label="Off">${esc(offText(i))}</td>${acts(i)}</tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No timer events.</td></tr>';
+  const entries = SCH ? SCH.timer : [];
+  $('#resolvedRows').innerHTML = entries.map(e => `<tr><td data-label="Day">${DAYS[e.day - 1]}</td><td data-label="Relay">${esc(relayName(e.relay))}</td><td data-label="Switch">${e.state ? 'On' : 'Off'}</td><td data-label="At">${esc(e.at)}</td></tr>`).join('');
+  $$('[data-tedit]').forEach(b => b.addEventListener('click', () => openTimer(findItem(b.dataset.tedit))));
+  $$('[data-tdel]').forEach(b => b.addEventListener('click', () => deleteItem(findItem(b.dataset.tdel), 'timer')));
+}
+function toggles(sel, labels, on) {
+  $(sel).innerHTML = labels.map((n, i) => `<button type="button" aria-pressed="${on.includes(i)}" data-v="${n.value}">${esc(n.text)}</button>`).join('');
+  $$(sel + ' button').forEach(b => b.addEventListener('click', () => b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') !== 'true')));
+}
+const picked = sel => $$(sel + ' button').filter(b => b.getAttribute('aria-pressed') === 'true').map(b => +b.dataset.v);
+$('#tOnType').innerHTML = '<option value="clock">clock time</option>' + ASTRO.map(a => `<option value="${a}">${a}</option>`).join('');
+$('#tOffType').innerHTML = '<option value="clock">at clock time</option><option value="duration">after duration (s)</option>' + ASTRO.map(a => `<option value="${a}">at ${a}</option>`).join('');
+function openTimer(item) {
+  timerItem = item;
+  const rel = RELAYS.filter(r => !r.locked);
+  toggles('#tRelays', rel.map(r => ({value: r.number, text: relayName(r.number)})), item ? rel.map((r, i) => item.relays.includes(r.number) ? i : -1) : []);
+  toggles('#tDays', DAYS.map((n, i) => ({value: i + 1, text: n})), item ? item.series_days.map(d => d - 1) : [0, 1, 2, 3, 4, 5, 6]);
+  const sa = item && item.start_astro, ea = item && item.end_astro;
+  $('#tOnType').value = sa ? sa.astro : 'clock'; $('#tOn').value = sa ? sa.offset : item ? item.time : '17:30:00';
+  $('#tOffType').value = ea ? ea.astro : item && item.duration_s ? 'duration' : 'clock';
+  $('#tOff').value = ea ? ea.offset : item && item.duration_s ? item.duration_s : item && item.end ? item.end : '23:00:00';
+  $('#timerErr').textContent = '';
+  $('#timerDlg').showModal();
+}
+$('#addTimer').addEventListener('click', () => openTimer(null));
+$('#timerSave').addEventListener('click', async e => {
+  e.preventDefault();
+  const days = picked('#tDays'), relays = picked('#tRelays');
+  if (!relays.length) { $('#timerErr').textContent = 'Pick at least one relay.'; return; }
+  if (!days.length) { $('#timerErr').textContent = 'Pick at least one day.'; return; }
+  const onT = $('#tOnType').value, offT = $('#tOffType').value, on = $('#tOn').value.trim(), off = $('#tOff').value.trim();
+  const body = {relays};
+  if (onT === 'clock') body.time = on; else body.start_astro = {astro: onT, offset: parseInt(on || '0', 10)};
+  if (offT === 'clock') body.end = off;
+  else if (offT === 'duration') body.duration_s = parseInt(off, 10);
+  else body.end_astro = {astro: offT, offset: parseInt(off || '0', 10)};
+  if (isNaN(body.duration_s === undefined ? 0 : body.duration_s) || (body.start_astro && isNaN(body.start_astro.offset)) || (body.end_astro && isNaN(body.end_astro.offset))) { $('#timerErr').textContent = 'Offsets and seconds must be whole numbers.'; return; }
+  let res;
+  if (timerItem) {
+    body.edited_at = loadedAt;
+    if (days.join() !== timerItem.series_days.join()) body.days = days;
+    res = await api('PUT', '/api/schedules/timer/' + encodeURIComponent(timerItem.id), body);
+  } else {
+    body.days = days;
+    res = await api('POST', '/api/schedules/timer', body);
+  }
+  if (afterEdit(res, timerItem ? 'Timer changed' : 'Timer added')) $('#timerDlg').close(); else $('#timerErr').textContent = why(res);
+});
+
+/* ---------- relays ---------- */
+async function loadRelays() {
+  const res = await api('GET', '/api/relays');
+  if (res.ok) { RELAYS = res.data.relays; renderRelays(); }
+}
+function renderRelays() {
+  $('#relays').innerHTML = RELAYS.map(r => r.locked
+    ? `<div class="relay locked"><h3>${esc(relayName(r.number))}</h3><div class="sub">Controlled by the boiler service</div></div>`
+    : `<div class="relay"><h3>${esc(relayName(r.number))}</h3><div class="sub" id="rs${r.number}"></div>
+       <div class="row"><input type="number" min="11" max="86400" value="600" id="rd${r.number}" aria-label="Seconds"> <span class="sub">sec</span>
+       <button class="btn small primary" data-ron="${r.number}">On</button> <button class="btn small" data-roff="${r.number}">Off</button></div></div>`).join('');
+  $$('[data-ron]').forEach(b => b.addEventListener('click', async () => {
+    const n = +b.dataset.ron, d = +$('#rd' + n).value;
+    if (!(d > 10)) { toast('Duration must be more than 10 seconds'); return; }
+    const res = await api('POST', '/api/relays/' + n, {action: 'on', seconds: d});
+    $('#rs' + n).textContent = res.ok ? `On requested for ${d} s` : '';
+    toast(res.ok ? res.data.message : why(res));
+  }));
+  $$('[data-roff]').forEach(b => b.addEventListener('click', async () => {
+    const n = +b.dataset.roff, res = await api('POST', '/api/relays/' + n, {action: 'off'});
+    $('#rs' + n).textContent = res.ok ? 'Off requested' : '';
+    toast(res.ok ? res.data.message : why(res));
+  }));
+}
+
+/* ---------- system ---------- */
+const when = iso => iso ? iso.slice(0, 16).replace('T', ' ') : 'never';
+async function loadSystem() {
+  const res = await api('GET', '/api/system');
+  if (!res.ok) return;
+  SYS = res.data;
+  const c = SYS.calendar;
+  $('#sysBoiler').textContent = SYS.connection;
+  $('#sysCal').textContent = !c ? 'not read yet' : c.auth_lost ? 'authorization needed' : !c.ok ? 'offline: ' + (c.error || '') : 'OK · read ' + when(c.at) + (c.problems.length ? ` · ${c.problems.length} skipped` : '');
+  SYS.push.forEach(p => {
+    const el = $(p.kind === 'boiler' ? '#sysPushBoiler' : '#sysPushTimer');
+    el.textContent = p.last_error ? 'failing: ' + p.last_error : p.pending ? 'waiting to be sent' : 'sent ' + when(p.last_pushed_at);
+  });
+  $('#sysVer').textContent = `v${SYS.version} · up ${ageText(SYS.uptime_s)}${SYS.dry_run ? ' · DRY RUN' : ''}`;
+  $('#log').textContent = SYS.log.slice().reverse().join('\n');
+}
+$('#pushNow').addEventListener('click', async () => {
+  const res = await api('POST', '/api/push', {});
+  toast(res.ok ? (res.data.ok ? 'Files pushed to the boiler Pi' : 'Some files could not be sent') : why(res));
+  loadSystem();
+});
+$('#syncNow').addEventListener('click', async () => {
+  const res = await api('POST', '/api/sync', {});
+  toast(res.ok ? 'Reading the calendar…' : why(res));
+  setTimeout(loadSchedules, 2500);
+});
+
+/* ---------- dialogs and login ---------- */
+function confirmDlg(title, text, ok) {
+  $('#cTitle').textContent = title; $('#cText').textContent = text;
+  const d = $('#confirmDlg'); d.returnValue = '';
+  d.addEventListener('close', function h() { d.removeEventListener('close', h); if (d.returnValue === 'ok') ok(); });
+  d.showModal();
+}
+function renderSession() {
+  $('#loginBtn').hidden = !(loginRequired && !loggedIn);
+  $('#logoutBtn').hidden = !(loginRequired && loggedIn);
+  if (SCH) { renderCalendarChip(); renderSchedule(); renderTimers(); }
+}
+function openLogin() { if (!$('#loginDlg').open) { $('#loginErr').textContent = ''; $('#lPass').value = ''; $('#loginDlg').showModal(); } }
+$('#lPass').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#loginOk').click(); } });
+$('#loginBtn').addEventListener('click', openLogin);
+$('#logoutBtn').addEventListener('click', async () => { await api('POST', '/api/logout', {}); loggedIn = false; renderSession(); });
+$('#loginOk').addEventListener('click', async e => {
+  e.preventDefault();
+  const res = await api('POST', '/api/login', {password: $('#lPass').value});
+  if (res.ok) { loggedIn = true; $('#loginDlg').close(); renderSession(); } else $('#loginErr').textContent = why(res);
+});
+
+/* ---------- start and polling ---------- */
+/* One small request every 10 s, only while the tab is visible; the 24 h history every 10 min. */
+let sec = 0, histSec = 0, timer = null;
+function tick() {
+  sec++; histSec++;
+  renderAge();
+  if (sec >= 10) {
+    sec = 0; loadStatus();
+    const t = activeTab();
+    if (t === 'boiler' || t === 'timer') loadSchedules();
+    if (t === 'system') loadSystem();
+  }
+  if (histSec >= 600) { histSec = 0; loadHistory(); }
+}
+function startPolling() { if (!timer) timer = setInterval(tick, 1000); }
+function stopPolling() { clearInterval(timer); timer = null; }
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopPolling(); else { sec = 10; tick(); startPolling(); } });
+(async function init() {
+  const s = await api('GET', '/api/session');
+  if (s.ok) { loginRequired = s.data.login_required; loggedIn = s.data.logged_in; }
+  await Promise.all([loadStatus(), loadRelays(), loadSchedules(), loadHistory()]);
+  renderSession();
+  if (!document.hidden) startPolling();
+})();
+</script>
+</body>
+</html>

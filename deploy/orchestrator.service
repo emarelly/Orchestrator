@@ -1,0 +1,55 @@
+# systemd unit of the Orchestrator (OPS-1, OPS-6, CS-16). Installed by deploy/install.sh.
+#
+# Type=notify + WatchdogSec: the service tells systemd when it is READY and pings the watchdog
+# only while its own health check passes; a hung service is restarted (OPS-6, OPS-7).
+# Start-limit: 5 starts in 10 minutes, then the unit stays "failed". Home Assistant then shows the
+# Orchestrator as offline (the MQTT last will), which is the alarm that still works (OPS-9).
+
+[Unit]
+Description=Home Control Orchestrator (boiler and timer schedules, UI, MQTT, e-mail commands)
+Documentation=file:///opt/orchestrator/current/README.md
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=orchestrator
+Group=orchestrator
+WorkingDirectory=/opt/orchestrator/current
+EnvironmentFile=/etc/orchestrator/orchestrator.env
+Environment=ORCHESTRATOR_CONFIG=/etc/orchestrator/config.toml
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/orchestrator/current/venv/bin/python -m orchestrator
+
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=240
+TimeoutStopSec=15
+WatchdogSec=60
+
+# A leak restarts the service instead of freezing the Pi 3 (1 GB RAM).
+MemoryHigh=250M
+MemoryMax=300M
+TasksMax=64
+
+# Hardening: the service may write only its data and log folders.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+UMask=0077
+ReadWritePaths=/var/lib/orchestrator /var/log/orchestrator
+
+[Install]
+WantedBy=multi-user.target
