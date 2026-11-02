@@ -23,7 +23,6 @@ from typing import Any, Protocol
 from google.auth.exceptions import RefreshError, TransportError
 
 from orchestrator.logging_setup import kv
-from orchestrator.weekdays import week_start
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +85,18 @@ class CalendarService(Protocol):
     def events(self) -> _Events: ...
 
 
-def week_window(now: datetime) -> tuple[datetime, datetime]:
-    """Return the start (Sunday 00:00) and the end (next Sunday 00:00) of the week of ``now``."""
+def schedule_window(now: datetime) -> tuple[datetime, datetime]:
+    """Return the seven days that make the schedule: today 00:00 up to the same time a week later.
+
+    The window rolls with the date instead of following the calendar week (Sunday to Saturday), so
+    that on a Saturday the coming Sunday is already read, and a one-off event made for next week is
+    taken as soon as it is within seven days. Every weekday occurs exactly once in the window, so
+    the weekly schedule has no duplicate slots.
+    """
     zone = now.tzinfo
     if zone is None:
         raise ValueError("a timezone-aware time is required")
-    first = week_start(now.date())
+    first = now.date()
     start = datetime.combine(first, time(0, 0), tzinfo=zone)
     end = datetime.combine(first + timedelta(days=7), time(0, 0), tzinfo=zone)
     return start, end

@@ -13,6 +13,9 @@ Timer::
     Timer: relaynum GardenLights duration 3600
 
 * ``relaynum`` is followed by relay numbers and/or relay names (see :mod:`orchestrator.relays`);
+* **a timer without any astro word** (neither at the start nor at the end) runs from the start to
+  the end of the *calendar event itself*; ``end``, ``duration`` and a clock ``start`` in the title
+  are then not needed and are ignored when the schedule is built (the title may still carry them);
 * ``start`` is optional: without an astro word the timer starts at the event's start time;
 * an astro word (``sunrise sunset dawn dusk noon midnight moonrise moonset twilight``) may be
   followed by ``+N`` or ``-N`` minutes. The first astro word is the start unless it comes after
@@ -20,7 +23,8 @@ Timer::
   behaviour (the legacy hours conversion never worked);
 * ``end`` is followed by a clock time (``23``, ``23 30`` or ``23:30:15``) or an astro word;
 * ``duration`` is followed by seconds. If both an end and a duration are given, the end wins when
-  the schedule is built (as in the legacy code).
+  the schedule is built (as in the legacy code). With an astro word in the title, an end or a
+  duration is required.
 
 The parser never raises on odd input: a title that is not a command gives no result, a title that
 looks like a command but is wrong gives a ``problem`` text (the legacy code crashed on several of
@@ -231,7 +235,8 @@ def _parse_timer(tokens: list[str], names: RelayNames) -> TitleResult:
         return TitleResult(
             problem="Timer event: no relay found after 'relaynum'", warnings=tuple(warnings)
         )
-    if end_clock is None and end_astro is None and duration is None:
+    has_astro = start is not None or end_astro is not None
+    if has_astro and end_clock is None and end_astro is None and duration is None:
         return TitleResult(
             problem="Timer event: needs an end time or a duration", warnings=tuple(warnings)
         )

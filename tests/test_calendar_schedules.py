@@ -37,8 +37,10 @@ def at(day: date, hour: int, minute: int = 0, second: int = 0) -> datetime:
     return datetime.combine(day, time(hour, minute, second), tzinfo=TZ)
 
 
-def event(summary: str, start: datetime, *, all_day: bool = False) -> CalendarEvent:
-    return CalendarEvent(f"id-{summary}-{start:%Y%m%d%H%M}", summary, start, None, all_day)
+def event(
+    summary: str, start: datetime, end: datetime | None = None, *, all_day: bool = False
+) -> CalendarEvent:
+    return CalendarEvent(f"id-{summary}-{start:%Y%m%d%H%M}", summary, start, end, all_day)
 
 
 def build(*events: CalendarEvent, location: Location | None = LOCATION) -> CalendarSchedules:
@@ -122,37 +124,61 @@ def test_identical_events_make_one_slot_but_different_ones_at_the_same_time_are_
 # --- timer events -----------------------------------------------------------------------------
 
 
-def test_a_clock_start_uses_the_event_time_and_a_clock_end() -> None:
-    result = build(event("Timer: relaynum 4 end 23:00", at(date(2026, 10, 20), 17, 30)))
+def test_a_timer_without_astro_runs_from_the_event_start_to_the_event_end() -> None:
+    day = date(2026, 10, 20)
+    result = build(event("Timer: relaynum 4", at(day, 17, 30), at(day, 23)))
     assert entries(result) == [(3, time(17, 30), 1, 4), (3, time(23, 0), 0, 4)]
 
 
-def test_a_duration_gives_the_off_time() -> None:
+def test_the_title_end_duration_and_clock_start_are_ignored_without_astro() -> None:
+    day = date(2026, 10, 20)
+    title = "Timer: relaynum GardenLights start 18:00 end 20:00 duration 60"
+    result = build(event(title, at(day, 17, 30), at(day, 23)))
+    assert entries(result) == [(3, time(17, 30), 1, 4), (3, time(23, 0), 0, 4)]
+
+
+def test_a_timer_without_astro_can_run_past_midnight_from_saturday_into_sunday() -> None:
     result = build(
-        event("Timer: relaynum GardenLights duration 3600", at(date(2026, 10, 20), 17, 30))
+        event("Timer: relaynum 4", at(date(2026, 10, 24), 23, 30), at(date(2026, 10, 25), 0, 30))
     )
-    assert entries(result) == [(3, time(17, 30), 1, 4), (3, time(18, 30), 0, 4)]
-
-
-def test_a_duration_can_run_past_midnight_from_saturday_into_sunday() -> None:
-    result = build(event("Timer: relaynum 4 duration 3600", at(date(2026, 10, 24), 23, 30)))
     assert entries(result) == [(1, time(0, 30), 0, 4), (7, time(23, 30), 1, 4)]  # Sunday first
 
 
-def test_an_end_before_the_start_means_the_next_day() -> None:
-    tuesday = build(event("Timer: relaynum 4 end 06:00", at(date(2026, 10, 20), 22)))
-    assert entries(tuesday) == [(3, time(22, 0), 1, 4), (4, time(6, 0), 0, 4)]
-    saturday = build(event("Timer: relaynum 4 end 06:00", at(date(2026, 10, 24), 22)))
+def test_a_timer_ending_exactly_at_midnight_ends_on_the_next_day_at_zero() -> None:
+    result = build(
+        event("Timer: relaynum 4", at(date(2026, 10, 24), 22), at(date(2026, 10, 25), 0))
+    )
+    assert entries(result) == [(1, time(0, 0), 0, 4), (7, time(22, 0), 1, 4)]
+
+
+def test_a_timer_without_astro_needs_an_event_end_after_its_start() -> None:
+    day = date(2026, 10, 20)
+    no_end = build(event("Timer: relaynum 4 duration 60", at(day, 17)))
+    same = build(event("Timer: relaynum 4", at(day, 17), at(day, 17)))
+    for result in (no_end, same):
+        assert result.timer.entries == ()
+        assert "needs an event end after its start" in result.problems[0]
+
+
+def test_an_astro_end_before_the_start_means_the_next_day() -> None:
+    tuesday = build(event("Timer: relaynum 4 start sunset end 06:00", at(date(2026, 10, 20), 12)))
+    assert [(e.day, e.at, e.state) for e in tuesday.timer.entries][1:] == [(4, time(6, 0), 0)]
+    saturday = build(event("Timer: relaynum 4 start sunset end 06:00", at(date(2026, 10, 24), 12)))
     assert (1, time(6, 0), 0, 4) in entries(saturday)  # Saturday night ends on Sunday morning
 
 
-def test_an_end_time_wins_over_a_duration() -> None:
-    result = build(event("Timer: relaynum 4 end 23:00 duration 60", at(date(2026, 10, 20), 17, 30)))
-    assert (3, time(23, 0), 0, 4) in entries(result)
+def test_with_astro_a_duration_gives_the_off_time_and_an_end_time_wins_over_it() -> None:
+    day = date(2026, 10, 20)
+    by_duration = build(event("Timer: relaynum 4 start dusk duration 3600", at(day, 12)))
+    on, off = by_duration.timer.entries
+    assert (off.day, off.state) == (3, 0) and on.at < off.at
+    by_end = build(event("Timer: relaynum 4 start dusk end 23:00 duration 60", at(day, 12)))
+    assert (3, time(23, 0), 0, 4) in entries(by_end)
 
 
 def test_every_relay_gets_its_own_on_and_off_entry() -> None:
-    result = build(event("Timer: relaynum 4 GardenRoof duration 600", at(date(2026, 10, 20), 17)))
+    day = date(2026, 10, 20)
+    result = build(event("Timer: relaynum 4 GardenRoof", at(day, 17), at(day, 18)))
     pairs = sorted((e.relay, e.state) for e in result.timer.entries)
     assert pairs == [(2, 0), (2, 1), (4, 0), (4, 1)]  # each relay once on and once off
 
@@ -221,13 +247,19 @@ def test_long_titles_are_shortened_in_messages() -> None:
 
 
 def test_an_unknown_relay_name_is_a_warning_and_the_event_still_works() -> None:
-    result = build(event("Timer: relaynum 4 garden duration 60", at(date(2026, 10, 20), 17)))
+    result = build(
+        event("Timer: relaynum 4 garden", at(date(2026, 10, 20), 17), at(date(2026, 10, 20), 18))
+    )
     assert result.problems == () and len(result.timer.entries) == 2
     assert "unknown relay name 'garden' ignored" in result.warnings[0]
 
 
 def test_an_ambiguous_relay_name_warns_and_uses_the_first_listing() -> None:
-    result = build(event("Timer: relaynum spareGround2 duration 60", at(date(2026, 10, 20), 17)))
+    result = build(
+        event(
+            "Timer: relaynum spareGround2", at(date(2026, 10, 20), 17), at(date(2026, 10, 20), 18)
+        )
+    )
     assert {e.relay for e in result.timer.entries} == {6}
     assert "listed for several relays; using 6" in result.warnings[0]
 
@@ -235,7 +267,7 @@ def test_an_ambiguous_relay_name_warns_and_uses_the_first_listing() -> None:
 def test_custom_relay_names_from_the_config_are_used() -> None:
     names = RelayNames([("Fountain", 3)])
     result = build_schedules(
-        [event("Timer: relaynum fountain duration 60", at(date(2026, 10, 20), 17))],
+        [event("Timer: relaynum fountain", at(date(2026, 10, 20), 17), at(date(2026, 10, 20), 18))],
         tz=TZ,
         location=LOCATION,
         relay_names=names,
@@ -256,7 +288,10 @@ def test_the_current_week_is_read_and_turned_into_schedules() -> None:
                 "items": [
                     google_event("Boiler: target=3.6; min=2", "2026-10-20T06:00:00+03:00", id="1"),
                     google_event(
-                        "Timer: relaynum 4 end 23:00", "2026-10-20T17:30:00+03:00", id="2"
+                        "Timer: relaynum 4",
+                        "2026-10-27T17:30:00+02:00",
+                        "2026-10-27T23:00:00+02:00",
+                        id="2",
                     ),
                     google_event("Dentist", "2026-10-21T10:00:00+03:00", id="3"),
                     google_event("Boiler: target=3", "2026-10-22T06:00:00+03:00", id="4"),
@@ -267,8 +302,8 @@ def test_the_current_week_is_read_and_turned_into_schedules() -> None:
     )
     clock = FakeClock(NOW)
     result = read_schedules(GoogleCalendarSource(service, "primary", TZ), clock, location=LOCATION)
-    assert service.calls[0]["timeMin"] == "2026-10-18T00:00:00+03:00"
-    assert service.calls[0]["timeMax"] == "2026-10-25T00:00:00+03:00"
+    assert service.calls[0]["timeMin"] == "2026-10-24T00:00:00+03:00"
+    assert service.calls[0]["timeMax"] == "2026-10-31T00:00:00+02:00"
     assert len(result.boiler.slots) == 1 and len(result.timer.entries) == 2
     assert any("min is missing" in p for p in result.problems)
     assert any(w == "calendar: event 5: unreadable start or end time" for w in result.warnings)
@@ -284,5 +319,6 @@ def test_a_calendar_error_is_not_swallowed() -> None:
 
 
 def test_timer_entries_are_plain_model_objects() -> None:
-    result = build(event("Timer: relaynum 4 duration 60", at(date(2026, 10, 20), 17)))
+    day = date(2026, 10, 20)
+    result = build(event("Timer: relaynum 4", at(day, 17), at(day, 18)))
     assert all(isinstance(e, TimerEntry) for e in result.timer.entries)

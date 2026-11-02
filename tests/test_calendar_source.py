@@ -15,7 +15,7 @@ from orchestrator.calendar_source import (
     CalendarUnavailable,
     GoogleCalendarSource,
     build_calendar_service,
-    week_window,
+    schedule_window,
 )
 from orchestrator.weekdays import week_start
 from tests.fake_google import FakeCalendarService, FakeHttpError, google_event
@@ -35,25 +35,30 @@ def source(service: FakeCalendarService) -> GoogleCalendarSource:
 
 
 def read(service: FakeCalendarService) -> Any:
-    start, end = week_window(NOW)
+    start, end = schedule_window(NOW)
     return source(service).read(start, end)
 
 
 # --- the week window --------------------------------------------------------------------------
 
 
-def test_the_window_is_sunday_to_the_next_sunday_in_the_local_zone() -> None:
-    start, end = week_window(NOW)
-    assert start == datetime(2026, 10, 18, 0, 0, tzinfo=JERUSALEM)
-    assert end == datetime(2026, 10, 25, 0, 0, tzinfo=JERUSALEM)
-    assert start.isoformat() == "2026-10-18T00:00:00+03:00"
-    assert end.isoformat() == "2026-10-25T00:00:00+03:00"  # the clocks change at 02:00, not 00:00
+def test_the_window_is_today_midnight_plus_seven_days_in_the_local_zone() -> None:
+    start, end = schedule_window(NOW)  # NOW is a Saturday
+    assert start.isoformat() == "2026-10-24T00:00:00+03:00"
+    assert (
+        end.isoformat() == "2026-10-31T00:00:00+02:00"
+    )  # winter time by then; clocks change on the 25th
 
 
-def test_a_sunday_starts_its_own_week_and_the_window_follows_the_clock_change() -> None:
-    start, end = week_window(datetime(2026, 10, 25, 9, 0, tzinfo=JERUSALEM))
-    assert start.isoformat() == "2026-10-25T00:00:00+03:00"
-    assert end.isoformat() == "2026-11-01T00:00:00+02:00"  # winter time by the end of the week
+def test_on_a_saturday_the_coming_sunday_midnight_is_inside_the_window() -> None:
+    start, end = schedule_window(NOW)
+    assert start <= datetime(2026, 10, 25, 0, 0, tzinfo=JERUSALEM) < end
+
+
+def test_the_window_rolls_with_the_date_instead_of_the_calendar_week() -> None:
+    start, end = schedule_window(datetime(2026, 10, 21, 23, 59, tzinfo=JERUSALEM))  # a Wednesday
+    assert start.isoformat() == "2026-10-21T00:00:00+03:00"
+    assert end.isoformat() == "2026-10-28T00:00:00+02:00"
 
 
 def test_week_start_is_the_sunday_on_or_before() -> None:
@@ -64,7 +69,7 @@ def test_week_start_is_the_sunday_on_or_before() -> None:
 
 def test_a_naive_time_has_no_window() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
-        week_window(datetime(2026, 10, 24, 16, 41))
+        schedule_window(datetime(2026, 10, 24, 16, 41))
 
 
 # --- what is asked from Google ----------------------------------------------------------------
@@ -78,8 +83,8 @@ def test_the_request_expands_recurring_events_and_asks_for_the_right_window() ->
     assert call["calendarId"] == "family@example.com"
     assert call["singleEvents"] is True  # recurring events become one event per day
     assert call["orderBy"] == "startTime"
-    assert call["timeMin"] == "2026-10-18T00:00:00+03:00"
-    assert call["timeMax"] == "2026-10-25T00:00:00+03:00"
+    assert call["timeMin"] == "2026-10-24T00:00:00+03:00"
+    assert call["timeMax"] == "2026-10-31T00:00:00+02:00"
     assert service.retries == [2]  # transient 5xx errors are retried by the client library
 
 
@@ -229,6 +234,6 @@ def test_the_real_service_can_be_built_without_any_network_access() -> None:
     assert request.uri.startswith(base)  # built from the bundled discovery document, not downloaded
 
 
-def test_the_window_end_is_exclusive_of_the_next_week() -> None:
-    start, end = week_window(NOW)
+def test_the_window_end_is_exclusive() -> None:
+    start, end = schedule_window(NOW)
     assert end - start == timedelta(days=7)

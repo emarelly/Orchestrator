@@ -222,7 +222,8 @@ def test_an_unknown_relay_name_is_ignored_with_a_warning() -> None:
     [
         ("Timer: duration 60", "no relay found"),
         ("Timer: relaynum", "no relay found"),
-        ("Timer: relaynum 4", "needs an end time or a duration"),
+        ("Timer: relaynum 4 start sunset", "needs an end time or a duration"),
+        ("Timer: relaynum 4 end sunset", "needs an end time or a duration"),
         ("Timer: relaynum nobody duration 60", "no relay found"),
         ("Timer: relaynum 9 duration 60", "relay 9 does not exist"),
         ("Timer: relaynum 4 duration abc", "duration must be a number of seconds"),
@@ -240,7 +241,7 @@ def test_an_unknown_relay_name_is_ignored_with_a_warning() -> None:
         ("Timer: relaynum 4 duration ²", "duration must be a number"),  # found by the fuzz test
         ("Timer: relaynum 4 duration ٣", "duration must be a number"),  # non-ASCII digits
         ("Timer: relaynum 4 start sunset + ² end 23", "whole minutes"),
-        ("Timer: relaynum 4 end ²", "needs an end time or a duration"),
+        ("Timer: relaynum 4 start sunset end ²", "needs an end time or a duration"),
         ("Timer: relaynum ² duration 60", "no relay found"),
         ("Timer: relaynum 4 duration " + "9" * 5000, "1 to 86400"),  # beyond Python's int limit
         ("Timer: relaynum " + "9" * 5000 + " duration 60", "does not exist"),
@@ -288,9 +289,12 @@ def test_random_titles_never_raise_and_always_give_a_consistent_result() -> None
             assert result.problem is None, title
         if isinstance(result.command, TimerCommand):
             assert result.command.relays, title
-            assert (
-                result.command.end_clock or result.command.end_astro or result.command.duration_s
-            ), title
+            if result.command.start or result.command.end_astro:  # a sun time needs an end
+                assert (
+                    result.command.end_clock
+                    or result.command.end_astro
+                    or result.command.duration_s
+                ), title
         if isinstance(result.command, BoilerCommand):
             assert result.command.target >= 0 and result.command.minimum >= 0, title
 
@@ -423,7 +427,6 @@ def test_timer_titles_are_written_in_the_documented_grammar(
             (4,), None, None, AstroTime("sunrise"), None
         ),  # the first astro word is a start
         TimerCommand((4,), AstroTime("sunset"), time(23, 0), AstroTime("sunrise"), None),
-        TimerCommand((4,), None, None, None, None),  # no end and no duration
         TimerCommand((), None, None, None, 60),  # no relay
         TimerCommand((4,), None, None, None, 86_401),  # longer than the parser accepts
         TimerCommand((4,), AstroTime("sunset", 2000), None, None, 60),  # offset beyond a day
@@ -459,7 +462,7 @@ def test_random_commands_either_round_trip_exactly_or_are_refused_for_a_known_re
         duration = rng.randint(1, 86_400) if rng.random() < 0.5 else None
         command = TimerCommand(relays, start, end_clock, end_astro, duration)
         impossible = (end_astro is not None and start is None) or (
-            kind == "none" and duration is None
+            kind == "none" and duration is None and start is not None
         )
         if impossible:
             with pytest.raises(UnrepresentableError):
@@ -467,3 +470,14 @@ def test_random_commands_either_round_trip_exactly_or_are_refused_for_a_known_re
         else:
             title = format_timer_title(command, NAMES)
             assert parse_title(title, NAMES).command == command, title
+
+
+def test_a_timer_title_without_astro_needs_no_end_or_duration() -> None:
+    result = parse_title("Timer: relaynum 4", NAMES)
+    assert result.problem is None
+    assert result.command == TimerCommand((4,), None, None, None, None)
+
+
+def test_a_timer_without_end_or_astro_is_written_as_the_bare_relay_list() -> None:
+    command = TimerCommand((4,), None, None, None, None)  # the event itself gives start and end
+    assert format_timer_title(command, NAMES) == "Timer: relaynum GardenLights"

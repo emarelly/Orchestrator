@@ -12,6 +12,9 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
+
+LOCAL_ZONE = ZoneInfo("Asia/Jerusalem")  # weekly series keep their local wall time, as in Google
 
 
 class FakeHttpError(Exception):
@@ -172,7 +175,8 @@ class FakeCalendarStore:
             days = fields.get("BYDAY", _WEEKDAY_CODES[start.weekday()]).split(",")
             day = low.date()
             while day < high.date():
-                moment = datetime.combine(day, start.timetz().replace(tzinfo=None), low.tzinfo)
+                wall_time = start.astimezone(LOCAL_ZONE).time()
+                moment = datetime.combine(day, wall_time, LOCAL_ZONE)
                 if (
                     _WEEKDAY_CODES[day.weekday()] in days
                     and day >= start.date()

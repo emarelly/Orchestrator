@@ -28,7 +28,9 @@ TZ = ZoneInfo("Asia/Jerusalem")
 NOW = datetime(2026, 10, 24, 16, 41, 0, tzinfo=TZ)  # a Saturday; the week starts on 2026-10-18
 LOCATION = Location(32.07, 34.82)
 BOILER_EVENT = google_event("Boiler: target=3.6; min=2", "2026-10-19T06:00:00+03:00", id="b1")
-TIMER_EVENT = google_event("Timer: relaynum 4 end 23:00", "2026-10-19T17:30:00+03:00", id="t1")
+TIMER_EVENT = google_event(
+    "Timer: relaynum 4", "2026-10-19T17:30:00+03:00", "2026-10-19T23:00:00+03:00", id="t1"
+)
 
 
 class FakePusher:
@@ -344,7 +346,7 @@ def test_a_change_made_in_google_calendar_shows_up_in_the_schedule_too() -> None
         [2],
         who="ui:admin",
     )
-    world.store.seed("by-hand", "Boiler: target=4; min=3", "2026-10-21T18:00:00+03:00", updated=NOW)
+    world.store.seed("by-hand", "Boiler: target=4; min=3", "2026-10-28T18:00:00+02:00", updated=NOW)
     assert [(s.day, s.target) for s in world.slots()] == [(2, Decimal("3")), (4, Decimal("4"))]
 
 

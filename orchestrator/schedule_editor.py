@@ -29,7 +29,7 @@ from typing import Protocol
 
 from orchestrator.calendar_schedules import ScheduleItem
 from orchestrator.calendar_source import CalendarAuthError, CalendarError
-from orchestrator.calendar_writer import RemoteEvent
+from orchestrator.calendar_writer import DEFAULT_LENGTH, RemoteEvent
 from orchestrator.clock import Clock
 from orchestrator.event_titles import (
     BoilerCommand,
@@ -75,7 +75,12 @@ class EventWriter(Protocol):
     def get(self, event_id: str) -> RemoteEvent: ...
 
     def create(
-        self, *, summary: str, start: datetime, recurrence: Sequence[str] = ()
+        self,
+        *,
+        summary: str,
+        start: datetime,
+        recurrence: Sequence[str] = (),
+        length: timedelta = DEFAULT_LENGTH,
     ) -> RemoteEvent: ...
 
     def patch(
@@ -85,9 +90,28 @@ class EventWriter(Protocol):
         summary: str | None = None,
         start: datetime | None = None,
         recurrence: Sequence[str] | None = None,
+        length: timedelta = DEFAULT_LENGTH,
     ) -> RemoteEvent: ...
 
     def delete(self, event_id: str) -> None: ...
+
+
+def _event_length(command: Command, start: datetime) -> timedelta:
+    """The length the calendar event needs so that its own end is right for ``command``.
+
+    A timer without a sun or moon time runs from the start to the end of the event, so the event is
+    made as long as the timer (an end before the start means the next day). Everything else keeps
+    the default length: the title, not the event end, holds the times.
+    """
+    if isinstance(command, TimerCommand) and command.start is None and command.end_astro is None:
+        if command.end_clock is not None:
+            end = datetime.combine(start.date(), command.end_clock, start.tzinfo)
+            if end <= start:
+                end += timedelta(days=1)
+            return end - start  # wall-clock difference, as the writer adds it back
+        if command.duration_s is not None:
+            return timedelta(seconds=command.duration_s)
+    return DEFAULT_LENGTH
 
 
 class _Stop(Exception):
@@ -141,7 +165,12 @@ class ScheduleEditor:
             moment = datetime.combine(
                 first, start.time().replace(microsecond=0, fold=0), start.tzinfo
             )
-            event = self._writer.create(summary=title, start=moment, recurrence=[_rule(weekdays)])
+            event = self._writer.create(
+                summary=title,
+                start=moment,
+                recurrence=[_rule(weekdays)],
+                length=_event_length(command, moment),
+            )
             return event.event_id, f"Created '{title}' on {_days_text(weekdays)}"
 
         return self._run("create", who, None, work)
@@ -180,7 +209,14 @@ class ScheduleEditor:
                 base = remote.start or item.event.start
                 start = datetime.combine(base.date(), start_time, base.tzinfo)
                 recurrence = list(remote.recurrence) if remote.recurrence else None
-            self._writer.patch(master_id, summary=title, start=start, recurrence=recurrence)
+            elif _event_length(command, item.event.start) != DEFAULT_LENGTH:
+                # the event's own end is the timer's end: write start and end again
+                start = remote.start or item.event.start
+                recurrence = list(remote.recurrence) if remote.recurrence else None
+            length = _event_length(command, start) if start is not None else DEFAULT_LENGTH
+            self._writer.patch(
+                master_id, summary=title, start=start, recurrence=recurrence, length=length
+            )
             return master_id, f"Changed '{remote.summary}' to '{title}'"
 
         return self._run("update", who, item.event.event_id, work)

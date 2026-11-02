@@ -4,9 +4,12 @@ This is the successor of the second half of ``ReadGmailCalendar.ReadCalendar``. 
 parsed (:mod:`orchestrator.event_titles`); then
 
 * a **Boiler** event becomes a slot at the event's own day and start time;
-* a **Timer** event becomes an ON entry at its start (or at its astro time) and an OFF entry at the
-  end: an end clock time or astro time wins over a duration, an end earlier than the start means the
-  next day (Saturday wraps to Sunday), and a duration is added on the absolute time line.
+* a **Timer** event without a sun or moon time in its title becomes an ON entry at the event's start
+  and an OFF entry at the event's end (the title's end, duration and clock start are ignored);
+* a **Timer** event with an astro time becomes an ON entry at its start (or at its astro time) and
+  an OFF entry at the end: an end clock time or astro time wins over a duration, an end earlier than
+  the start means the next day (Saturday wraps to Sunday), and a duration is added on the absolute
+  time line.
 
 Nothing is guessed or clamped: an event that cannot be used (bad title, value above the heater
 limit, all-day, no location for a sun time) is **skipped and reported** in ``problems`` while all
@@ -20,7 +23,7 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 
 from orchestrator.astro import AstroError, Location, resolve_astro
-from orchestrator.calendar_source import CalendarEvent, CalendarSource, week_window
+from orchestrator.calendar_source import CalendarEvent, CalendarSource, schedule_window
 from orchestrator.clock import Clock
 from orchestrator.event_titles import BoilerCommand, TimerCommand, parse_title
 from orchestrator.models import (
@@ -143,22 +146,32 @@ def _add_timer(
 ) -> bool:
     """Add the ON / OFF entries of a timer event; False if the event could not be resolved."""
     event_day = event.start.date()
-    try:
-        start = (
-            event.start
-            if command.start is None
-            else resolve_astro(command.start, event_day, location, tz)
-        )
-        if command.end_clock is not None or command.end_astro is not None:
-            end = _end_moment(command, event_day, tz, location, offset_days=0)
-            if end.astimezone(UTC) < start.astimezone(UTC):  # earlier than the start: next day
-                end = _end_moment(command, event_day, tz, location, offset_days=1)
-        else:
-            assert command.duration_s is not None  # guaranteed by the title parser
-            end = (start.astimezone(UTC) + timedelta(seconds=command.duration_s)).astimezone(tz)
-    except AstroError as error:
-        problems.append(f"{label}: {error}")
-        return False
+    if command.start is None and command.end_astro is None:
+        # no sun or moon time: the event's own start and end are the timer; the title's end,
+        # duration and clock start are ignored
+        if event.end is None or event.end.astimezone(UTC) <= event.start.astimezone(UTC):
+            problems.append(
+                f"{label}: a timer without a sun time needs an event end after its start"
+            )
+            return False
+        start, end = event.start, event.end.astimezone(tz)
+    else:
+        try:
+            start = (
+                event.start
+                if command.start is None
+                else resolve_astro(command.start, event_day, location, tz)
+            )
+            if command.end_clock is not None or command.end_astro is not None:
+                end = _end_moment(command, event_day, tz, location, offset_days=0)
+                if end.astimezone(UTC) < start.astimezone(UTC):  # earlier than the start: next day
+                    end = _end_moment(command, event_day, tz, location, offset_days=1)
+            else:
+                assert command.duration_s is not None  # guaranteed by the title parser
+                end = (start.astimezone(UTC) + timedelta(seconds=command.duration_s)).astimezone(tz)
+        except AstroError as error:
+            problems.append(f"{label}: {error}")
+            return False
     on_day, on_at = day_and_time(start)
     off_day, off_at = day_and_time(end)
     for relay in command.relays:
@@ -195,7 +208,7 @@ def read_schedules(
     Raises :class:`~orchestrator.calendar_source.CalendarError` if the calendar cannot be read; the
     caller then keeps the last known schedules.
     """
-    start, end = week_window(clock.now())
+    start, end = schedule_window(clock.now())
     reading = source.read(start, end)
     built = build_schedules(
         reading.events,

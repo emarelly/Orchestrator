@@ -123,13 +123,27 @@ def test_a_created_timer_title_reads_back_as_the_same_command(rig: Rig) -> None:
     assert parse_title(item["summary"]).command == command
 
 
+def test_a_timer_without_astro_is_created_with_the_event_end_of_the_timer(rig: Rig) -> None:
+    by_end = TimerCommand((4,), None, time(23, 0), None, None)
+    assert rig.editor.create(by_end, NOW.replace(hour=17, minute=30), [2], who="ui:admin").ok
+    assert rig.store.items["new-1"]["end"]["dateTime"].startswith("2026-10-19T23:00:00")
+    by_duration = TimerCommand((4,), None, None, None, 5400)
+    assert rig.editor.create(by_duration, NOW.replace(hour=22, minute=0), [2], who="ui:admin").ok
+    assert rig.store.items["new-2"]["end"]["dateTime"].startswith("2026-10-19T23:30:00")
+
+
+def test_a_timer_ending_before_its_start_is_created_ending_on_the_next_day(rig: Rig) -> None:
+    command = TimerCommand((4,), None, time(6, 0), None, None)
+    assert rig.editor.create(command, NOW.replace(hour=22, minute=0), [7], who="ui:admin").ok
+    assert rig.store.items["new-1"]["end"]["dateTime"].startswith("2026-10-25T06:00:00")
+
+
 @pytest.mark.parametrize(
     ("command", "days", "message"),
     [
         (BoilerCommand(Decimal("6"), Decimal("2")), [2], "above the limit of 5"),
         (BoilerCommand(Decimal("3"), Decimal("-1")), [2], "below 0"),
         (TimerCommand((4,), None, None, AstroTime("sunrise"), None), [2], "needs an astro start"),
-        (TimerCommand((4,), None, None, None, None), [2], "cannot be written"),
         (THREE, [], "at least one day"),
         (THREE, [8], "day of week"),
     ],

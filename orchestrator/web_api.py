@@ -710,6 +710,10 @@ def _items_json(report: SyncReport | None) -> list[dict[str, Any]]:
             entry["end"] = format_time(command.end_clock) if command.end_clock else None
             entry["end_astro"] = _astro_json(command.end_astro)
             entry["duration_s"] = command.duration_s
+            if command.start is None and command.end_astro is None and item.event.end:
+                # no sun time: the event's own end is the timer's end, whatever the title says
+                entry["end"] = format_time(day_and_time(item.event.end)[1])
+                entry["duration_s"] = None
         items.append(entry)
     return items
 

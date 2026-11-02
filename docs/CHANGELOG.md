@@ -2,6 +2,17 @@
 
 All notable changes, per version. The version is `orchestrator.__version__` (and `pyproject.toml`).
 
+## Unreleased
+
+### Changed
+* Timer events without a sun or moon time now run from the start to the end of the calendar event
+  itself (`Timer: relaynum 4`); `end`, `duration` and a clock `start` in the title are ignored.
+  Titles with a sun time (`start sunset`, `end sunrise`) work as before. The page writes the event
+  end for such timers. FR-CFG-6.
+* The calendar is read for the coming seven days (today 00:00 to +7 days) instead of the Sunday to
+  Saturday week, so the Saturday-to-Sunday midnight and one-off events for next week are taken.
+  FR-CFG-1.
+
 ## 0.1.0 - first complete version (not yet run on the real Pi)
 
 Built and tested against fakes only; acceptance on the Pi (PLAN.md section 3, M8) is still to do.
