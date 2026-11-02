@@ -28,6 +28,16 @@ Built and tested against fakes only; acceptance on the Pi (PLAN.md section 3, M8
 * Tools: `python -m orchestrator.auth`, `python -m orchestrator.ssh_reboot --show-host-key`,
   `tools/check.py`, `tools/ui_smoke.py`, `tools/freeze_tested.py`, `tools/check_pi_install.sh`.
 
+### Changed (2026-10-28)
+* Manual control uses the boiler Pi's own endpoints (`manualon/`, `manualoff/`, `auto/`, `relayon/`)
+  instead of uploading manual files (OQ-16). The boiler Pi chooses the level (4) and the time (about
+  3 h On, about an hour Off); a chosen duration is refused. Relay on and off are `relayon/` and
+  `relayoff/`; a duration of 0 or less means without a time limit (OQ-14). Config keys `manual_upload_path` and
+  `relay_manual_upload_path` are gone; `manual_on_path`, `manual_off_path` and `manual_auto_path`
+  are new.
+* The history answer of the boiler Pi is read as text and its month is 1-based; the three tank
+  levels use fixed sensor positions; the page redraws the chart every minute.
+
 ### Google logins
 * The mail and the calendar may use two different logins (`GOOGLE_TOKEN_FILE` and the optional
   `GOOGLE_CALENDAR_TOKEN_FILE`), so the old Gmail token and the old read-only Calendar token can be

@@ -29,7 +29,9 @@ def test_defaults_without_a_file() -> None:
     assert config.general.dry_run is False
     assert config.limits.max_showers == HARD_MAX_SHOWERS == 5.0
     assert config.boiler.url(config.boiler.status_path) == "http://MARELLYPI3:8000/status/"
-    assert config.boiler.manual_upload_path is None  # OQ-16 stays undecided, not invented
+    assert config.boiler.manual_on_path == "manualon/"  # the boiler Pi's own endpoints (OQ-16)
+    assert config.boiler.manual_off_path == "manualoff/"
+    assert config.boiler.manual_auto_path == "auto/"
 
 
 def test_example_file_loads_and_equals_the_defaults() -> None:
@@ -42,7 +44,7 @@ def test_file_values_are_loaded_and_normalized(tmp_path: Path) -> None:
         """
 [boiler]
 base_url = "http://10.0.0.5:8000"
-manual_upload_path = "uploadmanual/"
+manual_on_path = "manual-on/"
 [limits]
 max_showers = 4
 [mail]
@@ -52,7 +54,7 @@ admin_email = "admin@example.com"
     )
     config = load_config(path, env={})
     assert config.boiler.base_url == "http://10.0.0.5:8000/"
-    assert config.boiler.manual_upload_path == "uploadmanual/"
+    assert config.boiler.manual_on_path == "manual-on/"
     assert config.limits.max_showers == 4.0
     assert config.mail.user_email_list == ("a@example.com", "b@example.org")
 

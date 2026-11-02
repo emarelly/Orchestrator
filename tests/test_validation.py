@@ -220,11 +220,9 @@ def test_relays_0_1_and_unknown_ones_are_refused(relay: int) -> None:
 
 @pytest.mark.parametrize(
     ("seconds", "allowed"),
-    [(10, False), (11, True), (86_400, True), (86_401, False), (0, False), (-5, False)],
+    [(10, False), (11, True), (86_400, True), (86_401, False), (1, False), (0, True), (-5, True)],
 )
-def test_manual_relay_duration_must_be_over_10_seconds_and_at_most_a_day(
-    seconds: int, allowed: bool
-) -> None:
+def test_manual_relay_duration_rules(seconds: int, allowed: bool) -> None:
     assert check_manual_relay(4, seconds).ok is allowed
 
 

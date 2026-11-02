@@ -13,8 +13,10 @@ What it publishes (``base`` is ``[mqtt] base_topic``):
 
 What it accepts, handled by the same objects as the UI (``source="mqtt"``):
 
-* ``base/cmd/manual``    ``on`` / ``off`` / ``auto`` or ``{"action": "on", "hours": 2}``;
-* ``base/cmd/relay/<n>`` ``ON`` / ``OFF`` or ``{"state": "ON", "seconds": 300}`` (relays 2..7).
+* ``base/cmd/manual``    ``on`` / ``off`` / ``auto`` (a chosen ``hours`` is accepted as input but
+  refused: the boiler Pi has fixed durations);
+* ``base/cmd/relay/<n>`` ``ON`` / ``OFF`` or ``{"state": "ON", "seconds": 300}`` (relays 2..7);
+  ``seconds`` of 0 or less means without a time limit, ``OFF`` alone has none.
 
 Retained command messages are ignored (a broker restart must never press a button again), command
 payloads are small and strictly checked, and the (slow) work of a command never runs on the MQTT
@@ -401,8 +403,6 @@ def parse_relay(payload: bytes) -> tuple[str, int | None]:
         raise CommandError("the state must be ON or OFF")
     if seconds is not None and (isinstance(seconds, bool) or not isinstance(seconds, int)):
         raise CommandError("seconds must be a whole number")
-    if seconds is not None and state.upper() == "OFF":
-        raise CommandError("OFF takes no duration")
     return state.upper(), seconds
 
 
@@ -528,7 +528,9 @@ class MqttBridge:
             run = seconds if seconds is not None else self._config.relay_on_seconds
             result = self._manual.relay_on(number, run, source="mqtt", who="mqtt")
         else:
-            result = self._manual.relay_off(number, source="mqtt", who="mqtt")
+            result = self._manual.relay_off(
+                number, seconds if seconds is not None else 0, source="mqtt", who="mqtt"
+            )
         self._report(f"relay {number} {state.lower()}", result.ok, result.message, result)
 
     def _report(

@@ -262,7 +262,7 @@ def test_manual_on_from_the_page_reaches_the_boiler_pi(harness: Harness) -> None
     assert wait_until(lambda: harness.get("/api/status")[1]["status"] is not None)
     code, answer = harness.post("/api/manual", {"action": "off"})
     assert code == 200 and answer["ok"] is True
-    assert b'"Target":0' in harness.pi.files["manual.json"]
+    assert [name for name, _ in harness.pi.commands] == ["manual_off"]
 
 
 def test_a_mail_command_is_answered_and_a_stranger_only_raises_an_alert(harness: Harness) -> None:
@@ -270,7 +270,7 @@ def test_a_mail_command_is_answered_and_a_stranger_only_raises_an_alert(harness:
     harness.gmail.add(gmail_message("m2", "stranger@example.net", "on", ""))
     assert wait_until(lambda: bool(harness.sent_to(ELI)) and bool(harness.sent_to(ALERT)))
     assert harness.sent_to("stranger@example.net") == []
-    assert harness.pi.uploads == []
+    assert harness.pi.uploads == [] and harness.pi.commands == []
     assert wait_until(lambda: harness.gmail.inbox == {})
 
 
@@ -280,7 +280,7 @@ def test_the_two_step_mail_exchange_works_through_the_whole_service(harness: Har
     assert wait_until(lambda: any(len(m["Subject"]) == 10 for m in harness.sent_to(ELI)))
     token = next(m["Subject"] for m in harness.sent_to(ELI) if len(m["Subject"]) == 10)
     harness.gmail.add(gmail_message("m2", ELI, token, ""))
-    assert wait_until(lambda: "manual.json" in harness.pi.files)
+    assert wait_until(lambda: ("manual_off", None) in harness.pi.commands)
 
 
 def test_a_boiler_that_goes_offline_and_returns_is_reported_to_the_admin(harness: Harness) -> None:
@@ -320,7 +320,7 @@ def test_mqtt_is_started_only_when_enabled_and_works_end_to_end(tmp_path: Path) 
         diag = json.loads(on.link.retained["orchestrator/state"])
         assert diag["version"] and diag["failed_components"] == 0 and "uptime_min" in diag
         on.link.receive("orchestrator/cmd/manual", "off")
-        assert wait_until(lambda: "manual.json" in on.pi.files)
+        assert wait_until(lambda: ("manual_off", None) in on.pi.commands)
         assert on.get("/healthz")[1]["components"]["mqtt"]["state"] in ("ok", "degraded")
     finally:
         on.stop()
@@ -360,7 +360,7 @@ def test_without_google_access_the_service_still_runs_and_says_what_is_needed(
 # --- the clock ------------------------------------------------------------------------------
 
 
-def test_nothing_is_sent_to_the_boiler_pi_while_the_clock_is_unsynchronized(
+def test_no_schedule_is_sent_to_the_boiler_pi_while_the_clock_is_unsynchronized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(app_module, "CLOCK_POLL_S", 0.05)
@@ -375,14 +375,13 @@ def test_nothing_is_sent_to_the_boiler_pi_while_the_clock_is_unsynchronized(
     made.start()
     try:
         assert wait_until(lambda: made.get("/api/status")[1]["status"] is not None)
-        code, answer = made.post("/api/manual", {"action": "off"})
-        assert code == 409 and "clock is not synchronized" in answer["message"]
         time.sleep(0.5)
-        assert made.pi.uploads == []  # neither the manual file nor the schedule
+        assert made.pi.uploads == []  # no schedule yet
         assert next(c for c in made.app.self_check if c["check"] == "clock")["ok"] is False
+        # a manual command is carried out by the boiler Pi with its own clock, so it may go
+        assert made.post("/api/manual", {"action": "off"})[0] == 200
         synchronized[0] = True
         assert wait_until(lambda: "Cal.json" in made.pi.files)
-        assert made.post("/api/manual", {"action": "off"})[0] == 200
     finally:
         made.stop()
 
@@ -414,7 +413,7 @@ def test_in_a_dry_run_nothing_is_uploaded_to_the_boiler_pi(tmp_path: Path) -> No
         assert code == 200 and "dry run" in answer["message"]
         assert wait_until(lambda: (tmp_path / "data" / "Cal.json").exists())
         time.sleep(0.3)
-        assert made.pi.uploads == []
+        assert made.pi.uploads == [] and made.pi.commands == []
     finally:
         made.stop()
 

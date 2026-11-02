@@ -89,7 +89,7 @@ def describe(command: ParsedCommand) -> str:
         return f"switch relay {command.relay} on for {command.seconds} seconds"
     return {
         CommandName.ON: "manual ON (heat now, for about 3 hours)",
-        CommandName.OFF: "manual OFF (no heating, for about 3 hours)",
+        CommandName.OFF: "manual OFF (no heating, for about an hour)",
         CommandName.AUTO: "AUTO (back to the schedule)",
         CommandName.RESET: "REBOOT of the boiler Pi",
     }.get(command.name, command.name.value)

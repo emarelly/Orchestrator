@@ -66,10 +66,11 @@ class BoilerConfig:
     relay_status_path: str = "relay/?relay="
     update_schedule_path: str = "updatecalander/"
     update_timer_path: str = "updaterelaycalander/"
-    relay_on_path: str = "relayon/"
-    relay_off_path: str = "relayoff/"
-    manual_upload_path: str | None = None  # OQ-16: not decided yet
-    relay_manual_upload_path: str | None = None  # OQ-16: not decided yet
+    manual_on_path: str = "manualon/"  # the boiler Pi builds its own manual.json (OQ-16)
+    manual_off_path: str = "manualoff/"
+    manual_auto_path: str = "auto/"  # the boiler Pi deletes manual.json
+    relay_on_path: str = "relayon/"  # body {"swith": relay, "duration": seconds}
+    relay_off_path: str = "relayoff/"  # same body; duration 0 = no time limit (OQ-14)
     ssh_port: int = 22  # for the reboot (FR-LEG-3a); the user and key / password are secrets
     ssh_host_key: str = ""  # SHA256 fingerprint of the boiler Pi's host key; empty = no reboot
     ssh_timeout_s: float = 10.0
@@ -450,10 +451,11 @@ def _build(raw: Mapping[str, Any], env: Mapping[str, str]) -> Config:
         relay_status_path=sec.text("relay_status_path", defaults.relay_status_path),
         update_schedule_path=sec.text("update_schedule_path", defaults.update_schedule_path),
         update_timer_path=sec.text("update_timer_path", defaults.update_timer_path),
+        manual_on_path=sec.text("manual_on_path", defaults.manual_on_path),
+        manual_off_path=sec.text("manual_off_path", defaults.manual_off_path),
+        manual_auto_path=sec.text("manual_auto_path", defaults.manual_auto_path),
         relay_on_path=sec.text("relay_on_path", defaults.relay_on_path),
         relay_off_path=sec.text("relay_off_path", defaults.relay_off_path),
-        manual_upload_path=sec.optional_text("manual_upload_path"),
-        relay_manual_upload_path=sec.optional_text("relay_manual_upload_path"),
         ssh_port=sec.integer("ssh_port", defaults.ssh_port, minimum=1, maximum=65535),
         ssh_host_key=sec.text("ssh_host_key", defaults.ssh_host_key, allow_empty=True),
         ssh_timeout_s=sec.number(

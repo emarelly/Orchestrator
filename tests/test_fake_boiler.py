@@ -4,7 +4,6 @@ import json
 import time
 from collections.abc import Iterator
 from datetime import time as clock_time
-from decimal import Decimal
 
 import pytest
 
@@ -14,18 +13,14 @@ from orchestrator.boiler_client import (
     BoilerRejected,
     BoilerUnreachable,
 )
-from orchestrator.manual import ManualUpload, build_auto, manual_upload, relay_filename
 from orchestrator.models import (
     BoilerSchedule,
     BoilerSlot,
-    ManualEntry,
-    ManualOverride,
     TimerEntry,
     TimerSchedule,
 )
 from orchestrator.schedule_files import (
     serialize_boiler_schedule,
-    serialize_relay_manual,
     serialize_timer_schedule,
 )
 from tests.fake_boiler import FakeBoilerPi
@@ -115,30 +110,51 @@ def test_a_rejected_upload_stores_nothing(pi: FakeBoilerPi, client: BoilerClient
     assert pi.files == {} and pi.uploads == []
 
 
-def test_a_relay_manual_file_is_stored_under_its_own_name(
-    pi: FakeBoilerPi, client: BoilerClient
-) -> None:
-    content = serialize_relay_manual(TIMER.entries)
-    client.upload_manual(ManualUpload(relay_filename(2), content))
-    assert pi.files["2Timermanual.json"] == content
-
-
-# --- manual On / Off / Auto against the fake (assumptions, see the module docstring) -------------
+# --- manual control as ManagerRestApi.py does it (OQ-16) ------------------------------------------
 
 
 def test_manual_on_makes_the_status_manual_and_auto_brings_it_back(
     pi: FakeBoilerPi, client: BoilerClient
 ) -> None:
-    override = ManualOverride(ManualEntry(7, clock_time(19), Decimal("5.0"), Decimal("5.0")))
-    client.upload_manual(manual_upload(override))
+    client.manual_on()
     status = client.get_status()
-    assert (status.mode, status.target, status.minimum) == ("Manual", 5.0, 5.0)
-    assert "manual.json" in pi.files
+    assert (status.mode, status.target, status.minimum) == ("Manual", 4.0, 4.0)
 
-    client.upload_manual(manual_upload(build_auto()))
+    client.manual_auto()
     status = client.get_status()
     assert (status.mode, status.target, status.minimum) == ("Auto", 3.0, 2.0)
-    assert "manual.json" not in pi.files
+    assert [name for name, _ in pi.commands] == ["manual_on", "auto"]
+
+
+def test_manual_off_means_target_and_min_zero(pi: FakeBoilerPi, client: BoilerClient) -> None:
+    client.manual_off()
+    status = client.get_status()
+    assert (status.mode, status.target, status.minimum) == ("Manual", 0.0, 0.0)
+
+
+def test_a_relay_run_is_recorded_as_the_boiler_service_would_read_it(
+    pi: FakeBoilerPi, client: BoilerClient
+) -> None:
+    client.relay_on(5, 300)
+    assert pi.commands == [("relay_on", {"swith": 5, "duration": 300})]
+
+
+def test_relay_off_is_recorded_like_relay_on(pi: FakeBoilerPi, client: BoilerClient) -> None:
+    client.relay_off(5)
+    assert pi.commands == [("relay_off", {"swith": 5, "duration": 0})]
+
+
+def test_the_fake_rejects_a_relay_run_without_the_expected_json_line(pi: FakeBoilerPi) -> None:
+    with pi.session() as session:
+        response = session.post("http://MARELLYPI3:8000/relayon/", data=b"nonsense", timeout=5)
+    assert response.status_code == 400 and pi.commands == []
+
+
+def test_rejected_commands_change_nothing(pi: FakeBoilerPi, client: BoilerClient) -> None:
+    pi.reject_uploads_with = 503
+    with pytest.raises(BoilerRejected):
+        client.manual_on()
+    assert client.get_status().mode == "Auto"
 
 
 # --- failure injection ------------------------------------------------------------------------

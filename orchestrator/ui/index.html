@@ -231,7 +231,7 @@ header, main { padding-left: env(safe-area-inset-left); padding-right: env(safe-
           <button data-act="off">Off</button>
           <button data-act="auto">Auto</button>
         </div>
-        <div class="sub" style="margin-top:10px">On sets Target and Min above the current showers (max 5). Off sets both to 0. Auto removes the override.</div>
+        <div class="sub" style="margin-top:10px">On heats to the boiler Pi's manual level for about 3 hours. Off stops the heating for about an hour. Auto returns to the schedule.</div>
       </div>
 
       <div class="card c4">
@@ -316,7 +316,7 @@ header, main { padding-left: env(safe-area-inset-left); padding-right: env(safe-
   <section class="panel" id="tab-relays">
     <div class="card" style="margin-top:16px">
       <h2>Manual relay switching</h2>
-      <p class="sub" style="margin-top:0">Switch a relay on for a number of seconds (more than 10). The Orchestrator builds the manual file and sends it to the boiler Pi.</p>
+      <p class="sub" style="margin-top:0">Seconds: more than 10 for a timed run, which the boiler Pi switches off by itself when the time is over; 0 (or less) means no time limit, so On stays on until you press Off. Off always has no time limit here. The boiler Pi acts about 90 seconds after the request.</p>
       <div class="relays" id="relays"></div>
     </div>
   </section>
@@ -472,7 +472,7 @@ function renderStatus() {
   const d = ST, s = d && d.status, off = isOffline();
   $('#modeBox').dataset.mode = s ? s.mode : '';
   $('#modeLabel').textContent = s ? s.mode : '–';
-  $('#modeSub').textContent = !s ? '' : s.mode === 'Manual' ? 'reverts to Auto about 3 h after the request' : s.mode === 'Auto' ? 'following the boiler schedule' : s.mode === 'Off' ? 'heating is switched off' : '';
+  $('#modeSub').textContent = !s ? '' : s.mode === 'Manual' ? 'reverts to Auto by itself when the manual time ends' : s.mode === 'Auto' ? 'following the boiler schedule' : s.mode === 'Off' ? 'heating is switched off' : '';
   const heating = !!s && s.heater_on;
   const hb = $('#heaterBadge'); hb.textContent = s ? (heating ? 'On' : 'Off') : '–'; hb.classList.toggle('on', heating);
   const m = s ? s.minutes_to_start : 0;
@@ -522,8 +522,13 @@ async function loadStatus() {
 /* ---------- 24 h chart ---------- */
 async function loadHistory() {
   const res = await api('GET', '/api/history');
-  if (res.ok) { HIST = res.data.samples; drawChart(); }
+  if (!res.ok) return;
+  const next = res.data.samples, last = a => a.length ? a[a.length - 1].at : '';
+  const changed = next.length !== HIST.length || last(next) !== last(HIST);
+  HIST = next;
+  if (changed || !svgDrawn) { svgDrawn = true; drawChart(); }  // redraw only when there is a new sample
 }
+let svgDrawn = false;
 function drawChart() {
   const svg = $('#chart'), box = svg.parentElement;
   const W = Math.max(280, Math.min(900, Math.floor(box.clientWidth - 32))), H = W < 520 ? 240 : 280;
@@ -716,18 +721,18 @@ function renderRelays() {
   $('#relays').innerHTML = RELAYS.map(r => r.locked
     ? `<div class="relay locked"><h3>${esc(relayName(r.number))}</h3><div class="sub">Controlled by the boiler service</div></div>`
     : `<div class="relay"><h3>${esc(relayName(r.number))}</h3><div class="sub" id="rs${r.number}"></div>
-       <div class="row"><input type="number" min="11" max="86400" value="600" id="rd${r.number}" aria-label="Seconds"> <span class="sub">sec</span>
+       <div class="row"><input type="number" min="0" max="86400" value="600" id="rd${r.number}" aria-label="Seconds"> <span class="sub">sec</span>
        <button class="btn small primary" data-ron="${r.number}">On</button> <button class="btn small" data-roff="${r.number}">Off</button></div></div>`).join('');
   $$('[data-ron]').forEach(b => b.addEventListener('click', async () => {
     const n = +b.dataset.ron, d = +$('#rd' + n).value;
-    if (!(d > 10)) { toast('Duration must be more than 10 seconds'); return; }
+    if (!(d > 10 || d <= 0)) { toast('Duration must be more than 10 seconds, or 0 for no time limit'); return; }
     const res = await api('POST', '/api/relays/' + n, {action: 'on', seconds: d});
-    $('#rs' + n).textContent = res.ok ? `On requested for ${d} s` : '';
+    $('#rs' + n).textContent = res.ok ? (d > 0 ? `On requested for ${d} s` : 'On requested, no time limit') : '';
     toast(res.ok ? res.data.message : why(res));
   }));
   $$('[data-roff]').forEach(b => b.addEventListener('click', async () => {
-    const n = +b.dataset.roff, res = await api('POST', '/api/relays/' + n, {action: 'off'});
-    $('#rs' + n).textContent = res.ok ? 'Off requested' : '';
+    const n = +b.dataset.roff, res = await api('POST', '/api/relays/' + n, {action: 'off', seconds: 0});
+    $('#rs' + n).textContent = res.ok ? 'Off requested, no time limit' : '';
     toast(res.ok ? res.data.message : why(res));
   }));
 }
@@ -782,7 +787,9 @@ $('#loginOk').addEventListener('click', async e => {
 });
 
 /* ---------- start and polling ---------- */
-/* One small request every 10 s, only while the tab is visible; the 24 h history every 10 min. */
+/* One small request every 10 s, only while the tab is visible; the 24 h history every minute (the
+   service caches it for a minute, the boiler Pi adds a sample about every 10 min) and at once when
+   the tab becomes visible again. */
 let sec = 0, histSec = 0, timer = null;
 function tick() {
   sec++; histSec++;
@@ -793,11 +800,11 @@ function tick() {
     if (t === 'boiler' || t === 'timer') loadSchedules();
     if (t === 'system') loadSystem();
   }
-  if (histSec >= 600) { histSec = 0; loadHistory(); }
+  if (histSec >= 60) { histSec = 0; loadHistory(); }
 }
 function startPolling() { if (!timer) timer = setInterval(tick, 1000); }
 function stopPolling() { clearInterval(timer); timer = null; }
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopPolling(); else { sec = 10; tick(); startPolling(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopPolling(); else { sec = 10; histSec = 60; tick(); startPolling(); } });
 (async function init() {
   const s = await api('GET', '/api/session');
   if (s.ok) { loginRequired = s.data.login_required; loggedIn = s.data.logged_in; }

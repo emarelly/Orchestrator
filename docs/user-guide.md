@@ -8,7 +8,8 @@ connected to the home network. Nothing to install.
 * The plan for the hot water lives in **Google Calendar**. The page shows it and the live state.
 * Want hot water **now**? Press **On**. Want to cancel the plan for a while? Press **Off**.
   Press **Auto** to go back to the plan.
-* A hand-given order lasts about **3 hours**, then the boiler returns to Auto by itself.
+* A hand-given order ends by itself (about **3 hours** for On, about **an hour** for Off), then the
+  boiler returns to Auto.
 
 ## The top bar
 
@@ -26,8 +27,9 @@ Three small lights tell if everything is connected:
   * **Auto** follows the calendar plan,
   * **Manual** is an order somebody gave by hand (the line under it says when it ends),
   * **Off** keeps the heating off.
-* **On / Off / Auto** buttons: **On** heats for a little more than the hot water you have now (never
-  more than 5 showers), **Off** stops the heating, **Auto** returns to the plan.
+* **On / Off / Auto** buttons: **On** heats to the boiler's own manual level for about 3 hours,
+  **Off** stops the heating for about an hour, **Auto** returns to the plan. The boiler Pi decides
+  the level and the time; they cannot be changed from here.
 * **Heater** says if the heating element is working right now, and when the next heating starts.
 * **Showers available** is how much hot water is ready, counted in showers. The line marked
   *Target* is what the heater heats up to, *Min* is the level it keeps at all times. Above 5 is not
@@ -62,8 +64,10 @@ looks like `Boiler: target=3.5; min=2`; a timer event like
 
 ## Relays tab
 
-Switch one relay on for a number of seconds (more than 10), or off. The first two relays belong to the
-boiler itself and are locked; they cannot be switched here.
+Switch one relay on for a number of seconds (more than 10). The boiler starts it about 90 seconds
+later and switches it off by itself when the time is over. **Enter 0 for no time limit:** On then
+stays on until you press Off. The **Off** button switches the relay off with no time limit. The first
+two relays belong to the boiler itself and are locked; they cannot be switched here.
 
 ## System tab
 
@@ -83,6 +87,6 @@ Looking at the page needs no password.
 |---|---|
 | "Boiler not responding" | The boiler Pi or the network is down. Nothing to press; the boiler follows its last plan. Check the power and the Wi-Fi. |
 | "Google authorization needed" | The link to your Google account expired. Ask whoever looks after the system to renew it. The last plan stays in force. |
-| On says "status is unknown / too old" | There is no fresh reading from the boiler yet. Wait a minute and try again. |
+| A button says "not sent" | The boiler Pi did not accept the command (offline or an error). It is tried once; press the button again when the Boiler light is green. |
 | My calendar change does not show | Wait up to 5 minutes, or press **Read calendar now** on the System tab. Check that the event title is written like the examples above. |
 | An event is missing from the plan | Open the System tab: events that could not be understood are listed there with the reason. |

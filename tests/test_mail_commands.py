@@ -219,7 +219,7 @@ def test_only_the_latest_request_is_pending(setup: Setup) -> None:
     setup.send(ELI, "off")
     assert setup.send(ELI, TOKENS[0]).kind is ResultKind.FAILED_CONFIRMATION
     assert setup.send(ELI, TOKENS[1]).kind is ResultKind.EXECUTED
-    assert b'"Target":0' in setup.rig.pi.files["manual.json"]
+    assert [name for name, _ in setup.rig.pi.commands] == ["manual_off"]
 
 
 def test_a_token_without_any_request_is_a_failed_confirmation(setup: Setup) -> None:
@@ -282,13 +282,14 @@ def test_a_correct_confirmation_resets_the_failure_count(setup: Setup) -> None:
 
 
 def test_the_done_mail_reports_a_failure_when_the_command_could_not_run() -> None:
-    made = Setup(poll=False)  # the boiler status is unknown, so manual On is refused
+    made = Setup()
+    made.rig.pi.reject_uploads_with = 503  # the boiler Pi refuses the command
     made.send(ELI, "on")
     made.send(ELI, TOKENS[0])
     done = made.last_reply()
     assert done["Subject"].startswith("on: FAILED")
-    assert "status is unknown" in done.get_content()
-    assert made.boiler_posts() == 0
+    assert "not sent" in done.get_content() and "503" in done.get_content()
+    assert made.boiler_posts() == 1
     made.rig.session.close()
 
 
@@ -305,8 +306,8 @@ def test_auto_and_off_run_after_confirmation(setup: Setup) -> None:
     setup.send(ELI, TOKENS[0])
     setup.send(ELI, "auto")
     setup.send(ELI, TOKENS[1])
-    assert setup.rig.pi.uploads[-1].content == b"[]"
-    assert "manual.json" not in setup.rig.pi.files
+    assert [name for name, _ in setup.rig.pi.commands] == ["manual_off", "auto"]
+    assert setup.rig.pi.status["Status"] == "Auto"
 
 
 def test_switch_runs_a_relay_after_confirmation(setup: Setup) -> None:

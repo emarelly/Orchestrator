@@ -185,11 +185,12 @@ def check_manual_relay_number(relay: int) -> ValidationResult:
 
 
 def check_manual_relay(relay: int, seconds: int) -> ValidationResult:
-    """Check a manual relay request (relays 2..7, more than 10 s and at most 24 h)."""
+    """Check a manual relay request (relays 2..7; a duration of 0 or less means no time limit,
+    otherwise it must be more than 10 s and at most 24 h)."""
     errors: list[str] = list(check_manual_relay_number(relay).errors)
-    if isinstance(seconds, bool) or not MIN_RELAY_SECONDS < seconds <= MAX_RELAY_SECONDS:
+    if isinstance(seconds, bool) or 0 < seconds <= MIN_RELAY_SECONDS or seconds > MAX_RELAY_SECONDS:
         errors.append(
-            f"duration {seconds} s is not allowed; it must be more than {MIN_RELAY_SECONDS} s "
-            f"and at most {MAX_RELAY_SECONDS} s"
+            f"duration {seconds} s is not allowed; use 0 for no time limit, or more than "
+            f"{MIN_RELAY_SECONDS} s and at most {MAX_RELAY_SECONDS} s"
         )
     return ValidationResult(tuple(errors))

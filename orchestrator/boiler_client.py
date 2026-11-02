@@ -2,14 +2,15 @@
 
 Every URL comes from :class:`~orchestrator.config.BoilerConfig`; every request has a timeout.
 File uploads are **one** multipart POST (field ``file``) and nothing else: the legacy ``Post()``
-sent a second, JSON request after a file upload and then reported failure.
+sent a second, JSON request after a file upload and then reported failure. Manual control is also
+one POST each: the boiler Pi builds its own manual files (``manualon/``, ``manualoff/``, ``auto/``,
+``relayon/``), so nothing is uploaded for it (OQ-16).
 
 Errors are specific so the callers can react correctly:
 
 * :class:`BoilerUnreachable` - timeout or connection problem (retry later, show "unknown");
 * :class:`BoilerRejected` - the Pi answered with a non-2xx status (do not mark a push as done);
 * :class:`BoilerBadAnswer` - the answer is not what was expected (treat as unreadable);
-* :class:`NotConfigured` - an endpoint that is still undecided (OQ-16) has no path configured.
 
 In dry-run mode uploads are built and logged but never sent (CLAUDE.md safety rules); reads still
 work. Response bodies are never logged in full.
@@ -24,7 +25,6 @@ import requests
 
 from orchestrator.config import BoilerConfig
 from orchestrator.logging_setup import kv
-from orchestrator.manual import MANUAL_FILENAME, ManualUpload
 from orchestrator.models import (
     RELAY_MAX,
     RELAY_MIN,
@@ -63,13 +63,9 @@ class BoilerBadAnswer(BoilerError):
     """The answer arrived but cannot be used (not JSON, wrong shape)."""
 
 
-class NotConfigured(BoilerError):
-    """An endpoint without a decided path (OQ-16) was used."""
-
-
 @dataclass(frozen=True, slots=True)
 class UploadResult:
-    """Outcome of an upload; ``sent`` is False in dry-run mode."""
+    """Outcome of an upload or a command POST; ``sent`` is False in dry-run mode."""
 
     sent: bool
     status_code: int
@@ -131,15 +127,38 @@ class BoilerClient:
         """Replace ``TimeCal.json`` on the boiler Pi."""
         return self._upload(self._config.update_timer_path, TIMER_SCHEDULE_FILENAME, content)
 
-    def upload_manual(self, upload: ManualUpload) -> UploadResult:
-        """Send ``manual.json`` or a ``<n>Timermanual.json`` (paths are undecided, OQ-16)."""
-        if upload.filename == MANUAL_FILENAME:
-            path, setting = self._config.manual_upload_path, "manual_upload_path"
-        else:
-            path, setting = self._config.relay_manual_upload_path, "relay_manual_upload_path"
-        if path is None:
-            raise NotConfigured(f"[boiler] {setting} is not configured yet (OQ-16)")
-        return self._upload(path, upload.filename, upload.content)
+    # --- manual control: the boiler Pi builds its own manual files ------------------------------
+
+    def manual_on(self) -> UploadResult:
+        """Manual On: the boiler Pi heats to its own manual level for about 3 hours."""
+        return self._command(self._config.manual_on_path)
+
+    def manual_off(self) -> UploadResult:
+        """Manual Off: no heating for about an hour."""
+        return self._command(self._config.manual_off_path)
+
+    def manual_auto(self) -> UploadResult:
+        """Back to the schedule: the boiler Pi deletes its ``manual.json``."""
+        return self._command(self._config.manual_auto_path)
+
+    def relay_on(self, relay: int, seconds: int) -> UploadResult:
+        """Switch a relay on for ``seconds`` (0 or less: on without a time limit).
+
+        The boiler Pi acts about 90 s later and, with a duration, switches the relay off again.
+        """
+        return self._relay(self._config.relay_on_path, relay, seconds)
+
+    def relay_off(self, relay: int, seconds: int = 0) -> UploadResult:
+        """Switch a relay off for ``seconds``, then on again (0 or less: off, no time limit)."""
+        return self._relay(self._config.relay_off_path, relay, seconds)
+
+    def _relay(self, path: str, relay: int, seconds: int) -> UploadResult:
+        if isinstance(relay, bool) or not RELAY_MIN <= relay <= RELAY_MAX:
+            raise ValueError(f"relay must be {RELAY_MIN}..{RELAY_MAX}")
+        if isinstance(seconds, bool):
+            raise ValueError("seconds must be a whole number")
+        # the key is spelt "swith" by the boiler service; 0 or less means no time limit
+        return self._command(path, {"swith": relay, "duration": max(seconds, 0)})
 
     # --- internals ----------------------------------------------------------------------------
 
@@ -176,8 +195,24 @@ class BoilerClient:
             sent=True, status_code=response.status_code, text=_snippet(response.text)
         )
 
+    def _command(self, path: str, payload: dict[str, int] | None = None) -> UploadResult:
+        """POST a command (once, never retried); in dry-run mode only log it."""
+        if self._dry_run:
+            logger.info(kv("boiler_command_skipped", reason="dry_run", path=path))
+            return UploadResult(sent=False, status_code=0, text="dry run: not sent")
+        response = self._send("POST", path, payload=payload)
+        logger.info(kv("boiler_command", path=path, status=response.status_code))
+        return UploadResult(
+            sent=True, status_code=response.status_code, text=_snippet(response.text)
+        )
+
     def _send(
-        self, method: str, path: str, *, files: dict[str, tuple[str, bytes]] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        files: dict[str, tuple[str, bytes]] | None = None,
+        payload: dict[str, int] | None = None,
     ) -> requests.Response:
         url = self._config.url(path)
         started = self._monotonic()
@@ -186,6 +221,7 @@ class BoilerClient:
                 method,
                 url,
                 files=files,
+                json=payload,
                 timeout=self._config.request_timeout_s,
                 allow_redirects=method == "GET",  # a redirected POST would silently become a GET
             )

@@ -139,6 +139,8 @@ def test_manual_payloads_that_are_refused(payload: bytes) -> None:
         (b"off", ("OFF", None)),
         (b'{"state": "on", "seconds": 300}', ("ON", 300)),
         (b'{"state": "OFF"}', ("OFF", None)),
+        (b'{"state": "OFF", "seconds": 30}', ("OFF", 30)),
+        (b'{"state": "ON", "seconds": 0}', ("ON", 0)),
     ],
 )
 def test_relay_payloads_that_are_accepted(payload: bytes, expected: tuple[str, int | None]) -> None:
@@ -153,7 +155,6 @@ def test_relay_payloads_that_are_accepted(payload: bytes, expected: tuple[str, i
         b'{"state": "ON", "seconds": 1.5}',
         b'{"state": "ON", "seconds": "5"}',
         b'{"state": "ON", "seconds": true}',
-        b'{"state": "OFF", "seconds": 30}',
         b'{"seconds": 30}',
         b'{"state": "ON", "x": 1}',
     ],
@@ -345,15 +346,10 @@ def test_the_manual_buttons_run_the_same_commands_as_the_ui(site: Site, action: 
     assert site.state()["mode"] in ("Auto", "Manual", "Off")
 
 
-def test_a_manual_command_can_carry_a_duration(site: Site) -> None:
-    site.command(site.topics.manual, '{"action": "off", "hours": 2}')
-    assert b'"Hour":"18:41:00"' in site.rig.pi.files["manual.json"]  # 16:41 + 2 h
-    site.command(site.topics.manual, "off")
-    assert b'"Hour":"19:41:00"' in site.rig.pi.files["manual.json"]  # the default is 3 h
-
-
-@pytest.mark.parametrize("hours", [0, 0.1, 12.5, 100, -1])
-def test_a_duration_outside_the_allowed_range_is_refused(site: Site, hours: float) -> None:
+@pytest.mark.parametrize("hours", [0, 0.1, 2, 12.5, 100, -1])
+def test_a_duration_is_refused_because_the_boiler_pi_has_fixed_durations(
+    site: Site, hours: float
+) -> None:
     site.command(site.topics.manual, json.dumps({"action": "on", "hours": hours}))
     assert site.posts() == 0
     assert site.last_command()["ok"] is False and "duration" in site.last_command()["message"]
@@ -380,9 +376,9 @@ def test_a_retained_command_is_never_run(site: Site) -> None:
 def test_a_refusal_by_the_shared_rules_is_reported(caplog: pytest.LogCaptureFixture) -> None:
     cold = Site(poll=False)
     cold.connect()
-    cold.command(cold.topics.manual, "on")
+    cold.command(cold.topics.relay(4), '{"state": "ON", "seconds": 5}')  # too short, and not 0
     assert cold.posts() == 0
-    assert cold.last_command()["ok"] is False and "unknown" in cold.last_command()["message"]
+    assert cold.last_command()["ok"] is False and "duration" in cold.last_command()["message"]
     cold.rig.session.close()
 
 
@@ -395,11 +391,12 @@ def test_a_relay_switch_runs_for_the_default_time_or_the_given_one(site: Site) -
     site.command(site.topics.relay(4), '{"state": "ON", "seconds": 120}')
     assert "Relay 4 on for 120 s" in site.last_command()["message"]
     site.command(site.topics.relay(4), "OFF")
-    assert site.last_command()["command"] == "relay 4 off"
+    assert site.last_command()["command"] == "relay 4 off" and site.last_command()["ok"] is True
+    assert "without a time limit" in site.last_command()["message"]
     assert site.posts() == 3
 
 
-@pytest.mark.parametrize("seconds", [10, 86401, 0])
+@pytest.mark.parametrize("seconds", [10, 1, 86401])
 def test_relay_durations_outside_the_rules_are_refused(site: Site, seconds: int) -> None:
     site.command(site.topics.relay(3), json.dumps({"state": "ON", "seconds": seconds}))
     assert site.posts() == 0 and site.last_command()["ok"] is False

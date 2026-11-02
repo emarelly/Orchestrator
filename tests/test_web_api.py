@@ -338,17 +338,28 @@ def test_manual_rejects_unknown_actions_and_fields(site: Site) -> None:
     assert site.boiler_posts() == 0
 
 
-def test_manual_on_is_refused_when_the_status_is_not_known() -> None:
-    site = Site(poll=False)
+def test_manual_on_does_not_need_a_known_status() -> None:
+    site = Site(poll=False)  # the boiler Pi chooses the level, not the Orchestrator
     answer = site.post("/api/manual", {"action": "on"})
-    assert answer.status_code == 409
-    assert answer.get_json()["ok"] is False
-    assert site.boiler_posts() == 0
+    assert answer.status_code == 200
+    assert answer.get_json()["ok"] is True
+    assert site.boiler_posts() == 1
 
 
-def test_a_relay_can_be_run_and_stopped(site: Site) -> None:
+def test_a_relay_can_be_run_and_switched_off(site: Site) -> None:
     assert site.post("/api/relays/4", {"action": "on", "seconds": 600}).status_code == 200
     assert site.post("/api/relays/4", {"action": "off"}).status_code == 200
+    assert site.boiler_posts() == 2
+
+
+@pytest.mark.parametrize("action", ["on", "off"])
+@pytest.mark.parametrize("seconds", [0, -1])
+def test_a_duration_of_zero_or_less_means_no_time_limit(
+    site: Site, action: str, seconds: int
+) -> None:
+    answer = site.post("/api/relays/4", {"action": action, "seconds": seconds})
+    assert answer.status_code == 200
+    assert "without a time limit" in answer.get_json()["message"]
 
 
 @pytest.mark.parametrize("relay", [0, 1, 8, 99])
@@ -364,7 +375,6 @@ def test_the_boilers_own_relays_and_unknown_relays_are_never_commanded(
     "body",
     [
         {"action": "on"},
-        {"action": "on", "seconds": 0},
         {"action": "on", "seconds": "60"},
         {"action": "on", "seconds": 86401},
         {"action": "spin"},

@@ -4,18 +4,21 @@ Nothing here opens a socket. :class:`FakeBoilerPi` answers the endpoints of Requ
 the way the real Pi does as far as it is known, and lets a test break it on purpose (offline, slow,
 HTTP errors, garbage answers, rejected uploads). Any request to another host fails the test.
 
+The manual endpoints follow ``ref files/ManagerRestApi.py`` (OQ-16): ``manualon/`` makes ``Status``
+``Manual`` with Target and Min 4, ``manualoff/`` makes it ``Manual`` with 0 and 0, ``auto/`` returns
+it to ``Auto``. ``relayon/`` and ``relayoff/`` take the JSON line
+``{"swith": relay, "duration": seconds}`` (a duration of 0 means no time limit); the fake only
+records them.
+
 Behaviour that is **assumed** and must be confirmed against the real boiler Pi:
 
-* the two manual-file upload paths (``uploadmanual/`` and ``uploadrelaymanual/``) do not exist in
-  ``Config.py`` yet (OQ-16): they are inventions of this fake, set through :func:`fake_config`;
-* an uploaded empty ``manual.json`` (``[]``) removes the override, so ``Status`` returns to
-  ``Auto`` (OQ-17); a non-empty one makes ``Status`` ``Manual`` with the uploaded Target / Min;
-* uploads must be a multipart form with the field ``file`` and must be readable by the services'
-  string-splitting parser (:mod:`tests.legacy_reader`), otherwise the fake answers 400.
+* the schedule uploads must be a multipart form with the field ``file`` and must be readable by
+  the services' string-splitting parser (:mod:`tests.legacy_reader`), otherwise the fake answers
+  400;
+* ``reject_uploads_with`` makes every POST answer with that status, commands included.
 """
 
 import copy
-import dataclasses
 import json
 import re
 import threading
@@ -32,8 +35,6 @@ from orchestrator.config import BoilerConfig
 from tests import legacy_reader
 
 HOST = "marellypi3:8000"  # requests lower-cases the host name
-FAKE_MANUAL_PATH = "uploadmanual/"
-FAKE_RELAY_MANUAL_PATH = "uploadrelaymanual/"
 
 DEFAULT_STATUS: dict[str, Any] = {
     "ActiveYesNo": "Yes",
@@ -50,12 +51,8 @@ DEFAULT_STATUS: dict[str, Any] = {
 
 
 def fake_config() -> BoilerConfig:
-    """The default boiler configuration plus the (invented) manual-file paths of the fake."""
-    return dataclasses.replace(
-        BoilerConfig(),
-        manual_upload_path=FAKE_MANUAL_PATH,
-        relay_manual_upload_path=FAKE_RELAY_MANUAL_PATH,
-    )
+    """The default boiler configuration: the fake answers on the real paths."""
+    return BoilerConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +76,7 @@ class FakeBoilerPi(BaseAdapter):
         # what the fake received
         self.files: dict[str, bytes] = {}
         self.uploads: list[Upload] = []
+        self.commands: list[tuple[str, dict[str, Any] | None]] = []  # manual endpoints called
         self.calls: list[tuple[str, str]] = []  # (method, path)
         # failure switches
         self.offline = False
@@ -97,10 +95,11 @@ class FakeBoilerPi(BaseAdapter):
         self._route(self.config.relay_status_path.split("?")[0], "GET", self._relay)
         self._route(self.config.update_schedule_path, "POST", self._upload_plain)
         self._route(self.config.update_timer_path, "POST", self._upload_plain)
-        if self.config.manual_upload_path:
-            self._route(self.config.manual_upload_path, "POST", self._upload_manual)
-        if self.config.relay_manual_upload_path:
-            self._route(self.config.relay_manual_upload_path, "POST", self._upload_plain)
+        self._route(self.config.manual_on_path, "POST", self._manual_on)
+        self._route(self.config.manual_off_path, "POST", self._manual_off)
+        self._route(self.config.manual_auto_path, "POST", self._manual_auto)
+        self._route(self.config.relay_on_path, "POST", self._relay_on)
+        self._route(self.config.relay_off_path, "POST", self._relay_off)
 
     # --- test controls ------------------------------------------------------------------------
 
@@ -179,8 +178,7 @@ class FakeBoilerPi(BaseAdapter):
         if uploaded is None:
             return Response("fake: the multipart field 'file' is missing", status=400)
         content = uploaded.read()
-        if content != b"[]" and not _readable_by_the_services(content):
-            # "[]" is the empty manual file, handled by the manual endpoint
+        if not _readable_by_the_services(content):
             return Response("fake: the services could not read this file", status=400)
         upload = Upload(request.path, uploaded.filename or "", content)
         self.uploads.append(upload)
@@ -193,21 +191,48 @@ class FakeBoilerPi(BaseAdapter):
         self.files[result.filename] = result.content
         return Response("ok", mimetype="text/plain")
 
-    def _upload_manual(self) -> Response:
-        result = self._receive()
-        if isinstance(result, Response):
-            return result
-        if result.content == b"[]":  # assumption (OQ-17): the empty file removes the override
-            self.files.pop("manual.json", None)
-            target, minimum = self._auto_values
-            self.status.update(Status="Auto", TargetVal=target, MinVal=minimum)
-        else:
-            entry = json.loads(result.content)[0]
-            self.files["manual.json"] = result.content
-            self.status.update(
-                Status="Manual", TargetVal=float(entry["Target"]), MinVal=float(entry["Min"])
-            )
+    def _command(self, name: str, body: dict[str, Any] | None = None) -> Response | None:
+        """Record a command; returns the error answer when uploads are set to be rejected."""
+        self.commands.append((name, body))
+        if self.reject_uploads_with is not None:
+            return Response("fake: commands are rejected", status=self.reject_uploads_with)
+        return None
+
+    def _manual_on(self) -> Response:
+        return self._command("manual_on") or self._set_manual(4.0, 4.0)
+
+    def _manual_off(self) -> Response:
+        return self._command("manual_off") or self._set_manual(0.0, 0.0)
+
+    def _manual_auto(self) -> Response:
+        refused = self._command("auto")
+        if refused is not None:
+            return refused
+        target, minimum = self._auto_values
+        self.status.update(Status="Auto", TargetVal=target, MinVal=minimum)
         return Response("ok", mimetype="text/plain")
+
+    def _set_manual(self, target: float, minimum: float) -> Response:
+        self.status.update(Status="Manual", TargetVal=target, MinVal=minimum)
+        return Response("ok", mimetype="text/plain")
+
+    def _relay_on(self) -> Response:
+        return self._relay_command("relay_on")
+
+    def _relay_off(self) -> Response:
+        return self._relay_command("relay_off")
+
+    def _relay_command(self, name: str) -> Response:
+        # the real handlers read the first line of the body as JSON
+        body = request.get_data(as_text=True).splitlines()
+        try:
+            data = json.loads(body[0])
+            relay, duration = int(data["swith"]), int(data["duration"])
+        except (IndexError, ValueError, KeyError, TypeError):
+            return Response("fake: expected one JSON line with swith and duration", status=400)
+        return self._command(name, {"swith": relay, "duration": duration}) or Response(
+            "ok", mimetype="text/plain"
+        )
 
 
 def _readable_by_the_services(content: bytes) -> bool:

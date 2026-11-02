@@ -32,7 +32,7 @@ import requests
 from orchestrator import __version__
 from orchestrator.admin_notifier import AdminNotifier
 from orchestrator.astro import load_location
-from orchestrator.boiler_client import BoilerClient, BoilerUnreachable, UploadResult
+from orchestrator.boiler_client import BoilerClient
 from orchestrator.calendar_source import (
     CalendarAuthError,
     CalendarRead,
@@ -70,7 +70,6 @@ from orchestrator.mail_client import (
 from orchestrator.mail_commands import MailCommands
 from orchestrator.mail_gate import SecurityAlerts
 from orchestrator.mail_worker import MailWorker
-from orchestrator.manual import ManualUpload
 from orchestrator.manual_commands import ManualCommands
 from orchestrator.mqtt_bridge import MqttBridge, MqttLink, build_link
 from orchestrator.push_queue import PushQueue
@@ -178,19 +177,6 @@ class _ClockGate:
             return self._ok
 
 
-class _GatedBoiler:
-    """No manual file is sent while the clock is unsynchronized (it holds an expiry clock time)."""
-
-    def __init__(self, client: BoilerClient, gate: _ClockGate) -> None:
-        self._client = client
-        self._gate = gate
-
-    def upload_manual(self, upload: ManualUpload) -> UploadResult:
-        if not self._gate.ok():
-            raise BoilerUnreachable("the clock is not synchronized yet, so nothing is sent")
-        return self._client.upload_manual(upload)
-
-
 class _Worker:
     """A thread that the supervisor may restart."""
 
@@ -258,14 +244,7 @@ class Application:
             config.boiler,
             on_transition=self.notifier.on_transition,
         )
-        self.manual = ManualCommands(
-            _GatedBoiler(self.boiler, gate),
-            self.cache,
-            self.clock,
-            config.limits,
-            stale_after=timedelta(seconds=config.boiler.stale_after_s),
-            refresh=self.poller.poll_once,
-        )
+        self.manual = ManualCommands(self.boiler, self.cache, refresh=self.poller.poll_once)
         self.push = PushQueue(self.boiler, data_dir, self.clock, gate=gate.ok)
         names = RelayNames(config.relays.names)
         source = (

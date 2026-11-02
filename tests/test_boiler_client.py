@@ -15,10 +15,8 @@ from orchestrator.boiler_client import (
     BoilerClient,
     BoilerRejected,
     BoilerUnreachable,
-    NotConfigured,
 )
 from orchestrator.config import BoilerConfig
-from orchestrator.manual import ManualUpload
 from tests.fakes import FakeBoilerAdapter, fake_session
 
 BASE = "http://MARELLYPI3:8000/"
@@ -247,37 +245,70 @@ def test_an_upload_that_cannot_connect_is_unreachable(
         make_client(session).upload_boiler_schedule(b"[]")
 
 
-# --- manual files: undecided endpoints (OQ-16) ------------------------------------------------
+# --- manual control: the boiler Pi's own endpoints (OQ-16) -------------------------------------
 
 
-def test_manual_uploads_are_refused_until_their_paths_are_configured(
+def test_manual_commands_are_posts_to_the_boiler_pis_endpoints_without_a_file(
     adapter: FakeBoilerAdapter, session: requests.Session
 ) -> None:
+    for path in ("manualon/", "manualoff/", "auto/"):
+        adapter.route("POST", BASE + path)
     client = make_client(session)
-    with pytest.raises(NotConfigured, match="manual_upload_path"):
-        client.upload_manual(ManualUpload("manual.json", b"[]"))
-    with pytest.raises(NotConfigured, match="relay_manual_upload_path"):
-        client.upload_manual(ManualUpload("2Timermanual.json", b"[]"))
-    assert adapter.requests == []  # nothing was sent anywhere
+    results = [client.manual_on(), client.manual_off(), client.manual_auto()]
+    assert all(r.sent and r.status_code == 200 for r in results)
+    assert [r.url for r in adapter.requests] == [
+        SENT(BASE + "manualon/"),
+        SENT(BASE + "manualoff/"),
+        SENT(BASE + "auto/"),
+    ]
+    assert all(r.method == "POST" and not r.body for r in adapter.requests)
 
 
-def test_manual_files_go_to_the_configured_paths(
+def test_a_relay_run_sends_the_json_line_the_boiler_service_reads(
     adapter: FakeBoilerAdapter, session: requests.Session
 ) -> None:
-    config = dataclasses.replace(
-        BoilerConfig(), manual_upload_path="uploadmanual/", relay_manual_upload_path="uploadrelay/"
-    )
-    adapter.route("POST", BASE + "uploadmanual/")
-    adapter.route("POST", BASE + "uploadrelay/")
-    client = make_client(session, config=config)
-    client.upload_manual(ManualUpload("manual.json", b"[]"))
-    client.upload_manual(ManualUpload("2Timermanual.json", b'[{"x":1}]'))
-    assert [r.url for r in adapter.requests] == [
-        SENT(BASE + "uploadmanual/"),
-        SENT(BASE + "uploadrelay/"),
+    adapter.route("POST", BASE + "relayon/")
+    make_client(session).relay_on(4, 600)
+    request = adapter.requests[0]
+    assert request.url == SENT(BASE + "relayon/")
+    assert request.content_type == "application/json"
+    # one line, keys as the boiler service spells them (it reads the first line of the body)
+    assert json.loads(request.body or b"") == {"swith": 4, "duration": 600}
+    assert b"\n" not in (request.body or b"")
+
+
+def test_relay_off_uses_its_own_path_and_a_duration_of_zero_or_less_means_no_limit(
+    adapter: FakeBoilerAdapter, session: requests.Session
+) -> None:
+    adapter.route("POST", BASE + "relayoff/")
+    adapter.route("POST", BASE + "relayon/")
+    client = make_client(session)
+    client.relay_off(4)
+    client.relay_off(5, 120)
+    client.relay_on(6, -30)  # negative is the same as 0
+    assert [(r.url, json.loads(r.body or b"")) for r in adapter.requests] == [
+        (SENT(BASE + "relayoff/"), {"swith": 4, "duration": 0}),
+        (SENT(BASE + "relayoff/"), {"swith": 5, "duration": 120}),
+        (SENT(BASE + "relayon/"), {"swith": 6, "duration": 0}),
     ]
-    assert b'filename="manual.json"' in adapter.requests[0].body
-    assert b'filename="2Timermanual.json"' in adapter.requests[1].body
+
+
+@pytest.mark.parametrize(("relay", "seconds"), [(-1, 60), (8, 60), (True, 60), (4, True)])
+def test_a_bad_relay_run_is_never_sent(
+    adapter: FakeBoilerAdapter, session: requests.Session, relay: int, seconds: int
+) -> None:
+    with pytest.raises(ValueError):
+        make_client(session).relay_on(relay, seconds)
+    assert adapter.requests == []
+
+
+def test_a_rejected_manual_command_is_reported_and_sent_once(
+    adapter: FakeBoilerAdapter, session: requests.Session
+) -> None:
+    adapter.route("POST", BASE + "manualon/", status=503, body="busy")
+    with pytest.raises(BoilerRejected, match="503"):
+        make_client(session).manual_on()
+    assert len(adapter.requests) == 1
 
 
 # --- dry run and logging ----------------------------------------------------------------------
@@ -287,12 +318,14 @@ def test_dry_run_builds_but_never_sends_an_upload(
     adapter: FakeBoilerAdapter, session: requests.Session, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    config = dataclasses.replace(BoilerConfig(), manual_upload_path="uploadmanual/")
-    client = make_client(session, dry_run=True, config=config)
+    client = make_client(session, dry_run=True)
     results = [
         client.upload_boiler_schedule(b"[]"),
         client.upload_timer_schedule(b"[]"),
-        client.upload_manual(ManualUpload("manual.json", b"[]")),
+        client.manual_on(),
+        client.manual_off(),
+        client.manual_auto(),
+        client.relay_on(2, 600),
     ]
     assert all(not r.sent and r.status_code == 0 for r in results)
     assert adapter.requests == []

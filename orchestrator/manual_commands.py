@@ -3,16 +3,16 @@
 One class, :class:`ManualCommands`, is the single place every channel (web UI, MQTT, e-mail) calls,
 so they all behave the same:
 
-* the file is built from the **fresh** boiler status and the clock (:mod:`orchestrator.manual`) and
-  validated (limit of 5, relays 2..7, duration), then uploaded **once**: manual commands are never
-  retried automatically (CS-10);
-* if the status is unknown, the boiler Pi is down or the reading is stale, manual On is **refused**
-  instead of guessing a level;
+* each command is **one POST** to an endpoint of the boiler Pi (``manualon/``, ``manualoff/``,
+  ``auto/``, ``relayon/``). The boiler Pi builds its own manual files and uses its own clock, so
+  nothing is uploaded and the Orchestrator does not choose a level or an expiry time (OQ-16);
+* the request is validated first (relays 2..7, duration) and sent **once**: manual commands are
+  never retried automatically (CS-10);
 * every attempt, accepted or refused, is written to the audit log with who asked and through which
   channel, and carries a correlation id that also appears in the log lines it produced
   (LOG-8, LOG-9);
-* after a successful upload the status is read again so the answer can say what the boiler Pi now
-  reports (FR-MAN-6); in dry-run mode the file is built and logged but nothing is sent.
+* after a successful POST the status is read again so the answer can say what the boiler Pi now
+  reports (FR-MAN-6); in dry-run mode the command is logged but nothing is sent.
 
 Expected problems come back as a :class:`CommandResult` with ``ok=False``; they are not exceptions.
 """
@@ -21,35 +21,40 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import Protocol
 
-from orchestrator.boiler_client import BoilerError, NotConfigured, UploadResult
-from orchestrator.clock import Clock
-from orchestrator.config import LimitsConfig
+from orchestrator.boiler_client import BoilerError, UploadResult
 from orchestrator.logging_setup import audit, correlation, kv
-from orchestrator.manual import (
-    ManualError,
-    ManualUpload,
-    build_auto,
-    build_manual_off,
-    build_manual_on,
-    manual_upload,
-    relay_off_upload,
-    relay_run_upload,
-)
-from orchestrator.models import BoilerStatus, ModelError, format_number, format_time
-from orchestrator.status_cache import ConnectionState, StatusCache
-from orchestrator.validation import ValidationError
-from orchestrator.weekdays import day_name
+from orchestrator.status_cache import StatusCache
+from orchestrator.validation import ValidationError, check_manual_relay
 
 logger = logging.getLogger(__name__)
 
+ON_TEXT = "Manual On: the boiler Pi heats to its own manual level for about 3 hours"
+OFF_TEXT = "Manual Off: no heating for about an hour"
+AUTO_TEXT = "Auto: the schedule applies again"
+NO_DURATION_TEXT = (
+    "the duration cannot be chosen: the boiler Pi runs manual On for about 3 hours and "
+    "manual Off for about an hour"
+)
 
-class ManualUploader(Protocol):
+
+class ManualError(ValueError):
+    """A manual request cannot be sent (for example a duration the boiler Pi does not accept)."""
+
+
+class BoilerCommands(Protocol):
     """What the commands need from the boiler client."""
 
-    def upload_manual(self, upload: ManualUpload) -> UploadResult: ...
+    def manual_on(self) -> UploadResult: ...
+
+    def manual_off(self) -> UploadResult: ...
+
+    def manual_auto(self) -> UploadResult: ...
+
+    def relay_on(self, relay: int, seconds: int) -> UploadResult: ...
+
+    def relay_off(self, relay: int, seconds: int) -> UploadResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,158 +65,116 @@ class CommandResult:
     sent: bool  # False for a refusal, a failure and for a dry run
     message: str
     correlation_id: str
-    observed_mode: str | None = None  # what the boiler Pi reported after the upload
-    filename: str | None = None
+    observed_mode: str | None = None  # what the boiler Pi reported after the command
+
+
+# a plan checks the request and returns what to send and how to describe it
+_Plan = Callable[[], tuple[Callable[[], UploadResult], str]]
 
 
 class ManualCommands:
-    """Builds, validates and uploads the manual files on behalf of every channel."""
+    """Validates and sends the manual commands on behalf of every channel."""
 
     def __init__(
         self,
-        client: ManualUploader,
+        client: BoilerCommands,
         cache: StatusCache,
-        clock: Clock,
-        limits: LimitsConfig,
         *,
-        stale_after: timedelta = timedelta(minutes=5),
         refresh: Callable[[], object] | None = None,
     ) -> None:
         self._client = client
         self._cache = cache
-        self._clock = clock
-        self._limits = limits
-        self._stale_after = stale_after
         self._refresh = refresh
         self._lock = threading.Lock()  # one command at a time, whatever the channel
 
     # --- the commands -------------------------------------------------------------------------
 
     def manual_on(self, *, source: str, who: str, hours: float | None = None) -> CommandResult:
-        """Heat now: Target and Min above the current showers (never above the limit)."""
+        """Heat now: the boiler Pi applies its own manual level for about 3 hours."""
 
-        def build(now: datetime) -> tuple[ManualUpload, str]:
-            status = self._usable_status(now)
-            override = build_manual_on(status, now, self._limits, hours)
-            entry = override.entry
-            assert entry is not None
-            level = format_number(entry.target)
-            until = f"{day_name(entry.expires_day)} {format_time(entry.expires_at)}"
-            return manual_upload(override), f"Manual On: Target and Min {level}, until {until}"
+        def plan() -> tuple[Callable[[], UploadResult], str]:
+            _no_duration(hours)
+            return self._client.manual_on, ON_TEXT
 
-        return self._execute("manual_on", source, who, build, hours=hours)
+        return self._execute("manual_on", source, who, plan, hours=hours)
 
     def manual_off(self, *, source: str, who: str, hours: float | None = None) -> CommandResult:
-        """Do not heat: Target 0 and Min 0 until the override expires."""
+        """Do not heat: the boiler Pi stops heating for about an hour."""
 
-        def build(now: datetime) -> tuple[ManualUpload, str]:
-            override = build_manual_off(now, self._limits, hours)
-            entry = override.entry
-            assert entry is not None
-            until = f"{day_name(entry.expires_day)} {format_time(entry.expires_at)}"
-            return manual_upload(override), f"Manual Off: Target and Min 0, until {until}"
+        def plan() -> tuple[Callable[[], UploadResult], str]:
+            _no_duration(hours)
+            return self._client.manual_off, OFF_TEXT
 
-        return self._execute("manual_off", source, who, build, hours=hours)
+        return self._execute("manual_off", source, who, plan, hours=hours)
 
     def auto(self, *, source: str, who: str) -> CommandResult:
-        """Back to the schedule: upload the empty manual file."""
+        """Back to the schedule: the boiler Pi removes its manual override."""
         return self._execute(
-            "manual_auto",
-            source,
-            who,
-            lambda _now: (manual_upload(build_auto()), "Auto: the schedule applies again"),
+            "manual_auto", source, who, lambda: (self._client.manual_auto, AUTO_TEXT)
         )
 
     def relay_on(self, relay: int, seconds: int, *, source: str, who: str) -> CommandResult:
-        """Switch a relay (2..7) on for ``seconds`` seconds."""
-        return self._execute(
-            "relay_on",
-            source,
-            who,
-            lambda now: (
-                relay_run_upload(relay, seconds, now),
-                f"Relay {relay} on for {seconds} s",
-            ),
-            relay=relay,
-            seconds=seconds,
-        )
+        """Switch a relay (2..7) on for ``seconds``; 0 or less means on without a time limit."""
 
-    def relay_off(self, relay: int, *, source: str, who: str) -> CommandResult:
-        """Switch a relay (2..7) off now (file form; the final payload is open, OQ-14)."""
-        return self._execute(
-            "relay_off",
-            source,
-            who,
-            lambda now: (relay_off_upload(relay, now), f"Relay {relay} off"),
-            relay=relay,
-        )
+        def plan() -> tuple[Callable[[], UploadResult], str]:
+            _check_relay(relay, seconds)
+            if seconds > 0:
+                text = f"Relay {relay} on for {seconds} s (the boiler Pi starts it in about 90 s)"
+            else:
+                text = (
+                    f"Relay {relay} on without a time limit (the boiler Pi switches it in about "
+                    "90 s; it stays on until it is switched off)"
+                )
+            return (lambda: self._client.relay_on(relay, seconds)), text
+
+        return self._execute("relay_on", source, who, plan, relay=relay, seconds=seconds)
+
+    def relay_off(self, relay: int, seconds: int = 0, *, source: str, who: str) -> CommandResult:
+        """Switch a relay (2..7) off; with ``seconds`` it comes back on after that time."""
+
+        def plan() -> tuple[Callable[[], UploadResult], str]:
+            _check_relay(relay, seconds)
+            if seconds > 0:
+                text = (
+                    f"Relay {relay} off for {seconds} s, then back on (the boiler Pi acts in "
+                    "about 90 s)"
+                )
+            else:
+                text = (
+                    f"Relay {relay} off without a time limit (the boiler Pi switches it in "
+                    "about 90 s)"
+                )
+            return (lambda: self._client.relay_off(relay, seconds)), text
+
+        return self._execute("relay_off", source, who, plan, relay=relay, seconds=seconds)
 
     # --- internals ----------------------------------------------------------------------------
 
-    def _usable_status(self, now: datetime) -> BoilerStatus:
-        """Return the fresh status or explain precisely why manual On cannot go ahead."""
-        snapshot = self._cache.snapshot()
-        if snapshot.state is ConnectionState.DOWN:
-            raise ManualError("the boiler Pi is not responding, so manual On cannot choose a level")
-        status = self._cache.fresh_status(now, self._stale_after)
-        if status is None:
-            if snapshot.status is None:
-                raise ManualError(
-                    "the boiler status is unknown, so manual On cannot choose a level"
-                )
-            minutes = round(snapshot.status.age(now).total_seconds() / 60)
-            raise ManualError(
-                f"the last boiler reading is {minutes} min old, too old to choose a level"
-            )
-        return status
-
     def _execute(
-        self,
-        action: str,
-        source: str,
-        who: str,
-        build: Callable[[datetime], tuple[ManualUpload, str]],
-        **details: object,
+        self, action: str, source: str, who: str, plan: _Plan, **details: object
     ) -> CommandResult:
         with self._lock, correlation() as cid:
-            now = self._clock.now()
             try:
-                upload, description = build(now)
-            except (ManualError, ValidationError, ModelError) as error:
+                send, description = plan()
+            except (ManualError, ValidationError) as error:
                 return self._finish(cid, action, source, who, "refused", False, str(error), details)
             try:
-                outcome = self._client.upload_manual(upload)  # exactly once, never retried
-            except NotConfigured as error:
-                return self._finish(
-                    cid, action, source, who, "not_configured", False, str(error), details, upload
-                )
+                outcome = send()  # exactly once, never retried
             except BoilerError as error:
                 return self._finish(
-                    cid, action, source, who, "failed", False, f"not sent: {error}", details, upload
+                    cid, action, source, who, "failed", False, f"not sent: {error}", details
                 )
             if not outcome.sent:
-                text = f"{description} (dry run: the file was built and logged, not sent)"
-                return self._finish(
-                    cid, action, source, who, "dry_run", True, text, details, upload
-                )
+                text = f"{description} (dry run: nothing was sent)"
+                return self._finish(cid, action, source, who, "dry_run", True, text, details)
             observed = self._observe()
             text = description + (f"; the boiler Pi now reports {observed}" if observed else "")
             return self._finish(
-                cid,
-                action,
-                source,
-                who,
-                "ok",
-                True,
-                text,
-                details,
-                upload,
-                sent=True,
-                observed=observed,
+                cid, action, source, who, "ok", True, text, details, sent=True, observed=observed
             )
 
     def _observe(self) -> str | None:
-        """Read the status again after an upload and return the mode the boiler Pi reports."""
+        """Read the status again after a command and return the mode the boiler Pi reports."""
         if self._refresh is None:
             return None
         try:
@@ -232,7 +195,6 @@ class ManualCommands:
         ok: bool,
         message: str,
         details: dict[str, object],
-        upload: ManualUpload | None = None,
         *,
         sent: bool = False,
         observed: str | None = None,
@@ -242,7 +204,6 @@ class ManualCommands:
             who=who,
             channel=source,
             result=result,
-            file=upload.filename if upload else None,
             observed_mode=observed,
             detail=message if result != "ok" else None,
             **details,
@@ -250,10 +211,16 @@ class ManualCommands:
         log = logger.info if ok else logger.warning
         log(kv("manual_command", action=action, result=result, channel=source))
         return CommandResult(
-            ok=ok,
-            sent=sent,
-            message=message,
-            correlation_id=cid,
-            observed_mode=observed,
-            filename=upload.filename if upload else None,
+            ok=ok, sent=sent, message=message, correlation_id=cid, observed_mode=observed
         )
+
+
+def _no_duration(hours: float | None) -> None:
+    if hours is not None:
+        raise ManualError(NO_DURATION_TEXT)
+
+
+def _check_relay(relay: int, seconds: int) -> None:
+    checked = check_manual_relay(relay, seconds)
+    if not checked.ok:
+        raise ValidationError(checked.errors)

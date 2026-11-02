@@ -22,8 +22,12 @@ log_path = "log/"
 relay_status_path = "relay/?relay="
 update_schedule_path = "updatecalander/"
 update_timer_path = "updaterelaycalander/"
-relay_on_path = "relayon/"
-relay_off_path = "relayoff/"
+# Manual control: the boiler Pi builds its own manual files. These are POST endpoints without a file.
+manual_on_path = "manualon/"    # heat to the boiler Pi's own manual level for about 3 hours
+manual_off_path = "manualoff/"  # no heating for about an hour
+manual_auto_path = "auto/"      # back to the schedule (the boiler Pi deletes manual.json)
+relay_on_path = "relayon/"      # relay on: body {"swith": relay, "duration": seconds}; 0 = no time limit
+relay_off_path = "relayoff/"    # relay off: same body; 0 = no time limit, else off for that long
 # Reboot of the boiler Pi over SSH (the e-mail command "reset"). The user and the key file or
 # password come from BOILER_SSH_USER and BOILER_SSH_KEY_FILE / BOILER_SSH_PASSWORD.
 # The reboot is refused until the Pi's host key fingerprint is set here; get it with
@@ -33,14 +37,11 @@ ssh_port = 22
 ssh_host_key = ""               # for example "SHA256:..." (43 characters after the colon)
 ssh_timeout_s = 10
 reboot_grace_s = 300            # down / up alerts are held back this long after a reboot
-# Not decided yet (OQ-16): the upload endpoints for the manual files. Leave unset until they exist.
-# manual_upload_path = "..."
-# relay_manual_upload_path = "..."
 
 [limits]
 max_showers = 5      # hard limit of the heater; values above 5 are rejected
-manual_margin = 1.0
-manual_duration_hours = 3
+manual_margin = 1.0             # no longer used: the boiler Pi chooses the manual level (OQ-16)
+manual_duration_hours = 3       # no longer used: the boiler Pi chooses the manual time (OQ-16)
 
 [web]
 host = "0.0.0.0"

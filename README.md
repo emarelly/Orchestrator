@@ -62,7 +62,7 @@ flowchart LR
 * **Upper / Mid / Lower** are the three temperatures in the tank. The hottest one is Upper (hot water
   rises). The colours tell what the water is good for: blue below 30°, teal up to 40°, green 40-50°
   (good for a shower), amber 50-60°, red 60-70°, dark red above 70°.
-* **Auto** follows the calendar. **Manual** is an order given by hand and lasts about 3 hours, then the
+* **Auto** follows the calendar. **Manual** is an order given by hand and lasts until the boiler Pi's manual time ends (about 3 hours for On, about an hour for Off), then the
   boiler goes back to Auto by itself. **Off** keeps the heater off.
 
 ### A normal day
@@ -101,10 +101,9 @@ through the same checks and end the same way:
 ```mermaid
 flowchart LR
     a["Page / Home Assistant / e-mail"] --> b{"Checks"}
-    b -->|"over 5 showers, relay 0 or 1,<br/>status too old, not allowed"| x["Refused, with a reason"]
-    b -->|"ok"| c["Build manual.json<br/>On = current showers + margin, at most 5<br/>Off = 0, Auto = empty file"]
-    c --> d["Send to the boiler Pi"]
-    d --> e["Boiler obeys until the expiry time<br/>(3 hours later), then returns to Auto"]
+    b -->|"relay 0 or 1,<br/>a chosen duration, not allowed"| x["Refused, with a reason"]
+    b -->|"ok"| c["One POST to the boiler Pi<br/>manualon/, manualoff/, auto/ or relayon/<br/>(no file: the boiler Pi decides level and time)"]
+    c --> e["Boiler obeys until its manual time ends<br/>(about 3 h On, about 1 h Off), then returns to Auto"]
 ```
 
 ### What happens when something goes wrong
@@ -159,8 +158,11 @@ For the code map, every flow in detail and the module list, see
 * The heater limit is **5 showers** on every channel (calendar, page, MQTT, e-mail, manual). A bigger
   value is refused, never reduced.
 * An empty schedule is never sent. A failed push is retried; nothing is guessed.
-* Manual On/Off/Auto work by sending a `manual.json` file; the boiler Pi deletes it at the expiry
-  time (3 hours after the request, or what MQTT asked for, 15 minutes to 12 hours).
+* Manual On/Off/Auto are single POSTs to the boiler Pi (`manualon/`, `manualoff/`, `auto/`); the
+  boiler Pi chooses the level and deletes its manual file when the time ends (about 3 hours for On,
+  about an hour for Off). A chosen duration is refused. A relay command (`relayon/`, `relayoff/`)
+  acts about 90 seconds after the request; a duration of 0 or less means on / off without a time
+  limit.
 * Relays 0 and 1 belong to the boiler service and can never be switched by hand (2 to 7 only).
 * Nothing is sent to the boiler Pi until the clock of the Pi that runs the Orchestrator is synchronized.
 * Passwords and tokens come from environment variables or files outside the program folder, and
@@ -203,7 +205,7 @@ important ones:
 |---|---|---|
 | `[general]` | `timezone`, `data_dir`, `log_dir`, `dry_run` | time zone, where files are kept |
 | `[boiler]` | `base_url`, `poll_interval_s`, `ssh_host_key`, `reboot_grace_s` | the boiler Pi's address and reboot settings |
-| `[limits]` | `max_showers`, `manual_margin`, `manual_duration_hours` | never above 5 showers |
+| `[limits]` | `max_showers` (`manual_margin` and `manual_duration_hours` are no longer used) | never above 5 showers |
 | `[web]` | `host`, `port`, `login_required` | the web page (LAN only) |
 | `[calendar]` | `calendar_id`, `poll_interval_s`, `write_back` | `write_back = true` lets the page change the real calendar |
 | `[mail]` | `user_email_list`, `admin_email`, `security_alert_email`, `check_interval_s` | who may command, who is told |
@@ -303,7 +305,7 @@ e-mail commands for 15 minutes. Mail from other addresses is deleted, not answer
 to `security_alert_email`.
 
 **Home Assistant:** with `[mqtt] enabled = true` the entities appear by themselves (discovery).
-Commands: topic `<base>/cmd/manual` (`on`, `off`, `auto`, or `{"action":"on","hours":2}`) and
+Commands: topic `<base>/cmd/manual` (`on`, `off`, `auto`; a chosen `hours` is refused) and
 `<base>/cmd/relay/<n>` (`ON`, `OFF`, or `{"state":"ON","seconds":300}`). Home Assistant shows the
 Orchestrator as **offline** when it dies: add a notification for that.
 
@@ -334,8 +336,9 @@ sudo systemctl restart orchestrator    curl http://localhost:8080/healthz
 |---|---|
 | Page chip **Boiler offline**, banner "Boiler not responding" | The boiler Pi or its network is down. Controls are disabled; its last files keep working. Check `[boiler] base_url` and `curl http://<boiler>:8000/status/`. |
 | **Google authorization needed** | Token revoked, expired ("Testing" mode) or missing. Run the authorization step again. |
-| Manual On says "status is unknown / too old" | No fresh boiler reading yet; wait for the next poll or fix the connection. |
-| Manual / schedule files are not sent | The clock is not synchronized yet (`timedatectl`), or `DRY_RUN` is on. See the System tab and the log. |
+| A manual command says "not sent" | The boiler Pi did not accept the POST (offline, or an HTTP error shown in the answer). It is sent once, never retried; press the button again. Check `curl -X POST http://<boiler>:8000/auto/` only if you want to test the endpoint by hand. |
+| Schedule files are not sent | The clock is not synchronized yet (`timedatectl`), or `DRY_RUN` is on. See the System tab and the log. Manual commands do not wait for the clock: the boiler Pi uses its own. |
+| A relay stays on | It was switched on with a duration of 0 or less (no time limit). Press Off, or send OFF. |
 | Nothing changes after editing in the page | Editing needs `write_back = true`; the change appears after the next calendar read (a few seconds). |
 | `reset` mail answers "host key is not configured" | Set `[boiler] ssh_host_key` (above). |
 | `reset` fails with "login was refused" | Check `BOILER_SSH_USER` and the key file or password; the user needs passwordless `sudo reboot`. |

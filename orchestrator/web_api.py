@@ -401,10 +401,11 @@ def create_app(deps: WebDeps) -> Flask:
         check_fields(data, ("action", "seconds"))
         action = data.get("action")
         if action == "on":
-            seconds = whole_number(data.get("seconds"), "seconds", 1, 86400)
+            seconds = whole_number(data.get("seconds"), "seconds", -86400, 86400)
             result = deps.manual.relay_on(number, seconds, source="ui", who=who())
         elif action == "off":
-            result = deps.manual.relay_off(number, source="ui", who=who())
+            seconds = whole_number(data.get("seconds", 0), "seconds", -86400, 86400)
+            result = deps.manual.relay_off(number, seconds, source="ui", who=who())
         else:
             raise InputError("action: expected on or off")
         return _command_json(result)
